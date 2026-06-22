@@ -20,6 +20,7 @@ export default defineConfig({
         auth: 'auth/views/auth.html',
         messenger: 'messaging/views/messenger.html',
         subscription: 'payments/views/subscription.html',
+        settings: 'settings/views/settings.html',
       },
     },
   },

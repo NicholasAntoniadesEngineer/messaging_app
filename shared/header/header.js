@@ -128,26 +128,47 @@ class Header {
     }
 
     /**
+     * Escape a string for safe interpolation into innerHTML/insertAdjacentHTML.
+     * @private
+     */
+    static _escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /**
      * Render the authenticated user menu (avatar + dropdown).
-     * Standalone messenger: only the user identity + Sign Out. No dead-page links.
+     * Standalone messenger: user identity + Subscription + Settings + Sign Out.
      * @private
      */
     static _renderUserMenu(userEmail, userInitials) {
+        // Escape user-controlled values (email is user-set on the settings page)
+        // before they reach insertAdjacentHTML — defense-in-depth against XSS.
+        const safeEmail = this._escapeHtml(userEmail);
+        const safeInitials = this._escapeHtml(userInitials);
         return `
                 <div class="header-user-menu">
                     <button class="user-avatar-button" id="user-avatar-button" aria-label="User menu" aria-expanded="false">
-                        <span class="user-initials">${userInitials}</span>
+                        <span class="user-initials">${safeInitials}</span>
                         <span class="avatar-notification-badge" id="avatar-notification-badge" style="display: none;">0</span>
                     </button>
                     <div class="user-dropdown-menu" id="user-dropdown-menu">
                         <div class="user-dropdown-item user-dropdown-username">
                             <i class="fa-regular fa-user user-dropdown-icon"></i>
-                            <span>${userEmail}</span>
+                            <span>${safeEmail}</span>
                             <span class="notification-count-badge" id="header-notification-count" style="display: none;">0</span>
                         </div>
                         <a href="${this.getModulePath('payments')}subscription.html" class="user-dropdown-item user-dropdown-subscription">
                             <i class="fa-solid fa-crown user-dropdown-icon"></i>
                             <span>Subscription</span>
+                        </a>
+                        <a href="${this.getModulePath('settings')}settings.html" class="user-dropdown-item user-dropdown-settings">
+                            <i class="fa-solid fa-gear user-dropdown-icon"></i>
+                            <span>Settings</span>
                         </a>
                         <button class="user-dropdown-item user-dropdown-signout" id="header-signout-button" aria-label="Sign out">
                             <i class="fa-solid fa-right-from-bracket user-dropdown-icon"></i>

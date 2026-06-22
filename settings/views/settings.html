@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Content-Security-Policy (SM-19): mirrors messenger.html. connect-src blocks
+         exfiltration to arbitrary hosts (defense-in-depth behind output escaping).
+         'unsafe-inline' for scripts is a known gap pending removal of inline blocks. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <title>Settings - Secure Messenger</title>
+    <link rel="stylesheet" href="../../shared/vendor/font-awesome/css/all.min.css">
+    <link rel="stylesheet" href="../../shared/styles/main-compiled.css">
+    <link rel="stylesheet" href="../../shared/styles/dark-theme.css?v=1">
+    <script src="../../shared/vendor/supabase/supabase.min.js"></script>
+    <script>
+        // Apply the saved font scale before first paint (messaging-specific key).
+        (function() {
+            var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
+            var s = localStorage.getItem('secure_messenger_fontScale') || 'medium';
+            document.documentElement.style.fontSize = (m[s] || 16) + 'px';
+        })();
+    </script>
+</head>
+<body>
+    <!-- Header will be injected by Header.js -->
+
+    <main class="page-container" role="main">
+        <div class="hero-section">
+            <h1 class="hero-title">Settings</h1>
+        </div>
+
+        <div class="settings-grid">
+            <!-- Account Card -->
+            <section class="settings-card form-section">
+                <h2 class="section-title"><i class="fas fa-user"></i> Account</h2>
+
+                <div class="settings-field">
+                    <label class="form-label">Email</label>
+                    <div id="account-email" class="settings-status"></div>
+                    <div id="account-created" class="settings-status" style="color: var(--text-secondary);"></div>
+                </div>
+
+                <div class="settings-field">
+                    <label for="new-email" class="form-label">Change Email</label>
+                    <input type="email" id="new-email" class="form-input" placeholder="new@example.com" autocomplete="email">
+                    <div class="settings-actions">
+                        <button id="update-email-button" class="btn btn-action">
+                            <i class="fas fa-envelope"></i> Update Email
+                        </button>
+                    </div>
+                    <div id="email-status" class="settings-status"></div>
+                </div>
+
+                <div class="settings-field">
+                    <label for="new-password" class="form-label">New Password</label>
+                    <input type="password" id="new-password" class="form-input" autocomplete="new-password">
+                </div>
+                <div class="settings-field">
+                    <label for="confirm-password" class="form-label">Confirm Password</label>
+                    <input type="password" id="confirm-password" class="form-input" autocomplete="new-password">
+                    <div class="settings-actions">
+                        <button id="update-password-button" class="btn btn-action">
+                            <i class="fas fa-key"></i> Update Password
+                        </button>
+                    </div>
+                    <div id="password-status" class="settings-status"></div>
+                </div>
+
+                <div class="settings-field">
+                    <label for="font-scale-select" class="form-label">Text Size</label>
+                    <select id="font-scale-select" class="form-select">
+                        <option value="very-small">Very Small</option>
+                        <option value="small">Small</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="large">Large</option>
+                        <option value="very-large">Very Large</option>
+                    </select>
+                </div>
+
+                <div class="settings-actions">
+                    <button id="sign-out-button" class="btn btn-secondary">
+                        <i class="fas fa-right-from-bracket"></i> Sign Out
+                    </button>
+                </div>
+            </section>
+
+            <!-- Security Card -->
+            <section class="settings-card form-section">
+                <h2 class="section-title"><i class="fas fa-shield-halved"></i> Security</h2>
+
+                <div class="settings-field">
+                    <label class="form-label">Your encryption fingerprint</label>
+                    <div id="key-fingerprint" class="settings-status" style="font-family: monospace; word-break: break-all;"></div>
+                    <p style="color: var(--text-secondary);">Compare this with a contact out-of-band to verify no one is intercepting your messages.</p>
+                </div>
+
+                <div class="settings-actions">
+                    <button id="sign-out-everywhere-button" class="btn btn-secondary">
+                        <i class="fas fa-power-off"></i> Sign Out Everywhere
+                    </button>
+                </div>
+                <div id="security-status" class="settings-status"></div>
+            </section>
+
+            <!-- Danger Zone Card -->
+            <section class="settings-card form-section">
+                <h2 class="section-title"><i class="fas fa-skull-crossbones"></i> Danger Zone</h2>
+
+                <div class="danger-zone">
+                    <p style="color: var(--text-secondary);">Permanently delete your account and ALL of your encrypted data: every conversation, message, attachment, encryption key, and device. This cannot be undone.</p>
+
+                    <div class="settings-field">
+                        <input type="text" id="delete-confirm-input" class="form-input" placeholder="Type DELETE to confirm">
+                    </div>
+
+                    <div class="danger-actions">
+                        <button id="delete-account-button" class="btn btn-danger" disabled>
+                            <i class="fas fa-trash"></i> Delete My Account
+                        </button>
+                    </div>
+                    <div id="delete-status" class="settings-status"></div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Scripts -->
+    <!-- Global Logging Configuration - MUST load first -->
+    <script src="../../shared/config/loggingConfig.js"></script>
+
+    <script src="../../database/config/supabaseConfig.js"></script>
+    <script src="../../shared/services/authService.js"></script>
+    <script src="../../database/config/databaseConfigBase.js"></script>
+    <script src="../../database/config/moneyTrackerDatabaseConfig.js"></script>
+    <script src="../../database/utils/databaseConfigHelper.js"></script>
+    <script src="../../database/databaseModule.js"></script>
+
+    <!-- Core Utilities -->
+    <script src="../../shared/config/moduleRegistry.js"></script>
+    <script src="../../shared/config/constants.js"></script>
+    <script src="../../shared/utils/logger.js"></script>
+    <script src="../../shared/utils/errorHandler.js"></script>
+    <script src="../../shared/utils/validators.js"></script>
+    <script src="../../shared/utils/passwordManager.js"></script>
+
+    <!-- Database Service -->
+    <script src="../../database/services/databaseService.js"></script>
+
+    <!-- E2E Encryption Module (for the Security fingerprint section) -->
+    <script src="../../encryption/config/encryptionConfigBase.js"></script>
+    <script src="../../encryption/config/moneyTrackerEncryptionConfig.js"></script>
+    <script src="../../encryption/utils/encryptionConfigHelper.js"></script>
+    <script src="../../encryption/services/cryptoLibraryLoader.js"></script>
+    <script src="../../encryption/services/keyDerivationService.js"></script>
+    <script src="../../encryption/services/cryptoPrimitivesService.js"></script>
+    <script src="../../encryption/services/keyStorageService.js"></script>
+    <script src="../../encryption/services/passwordCryptoService.js"></script>
+    <script src="../../encryption/services/historicalKeysService.js"></script>
+    <script src="../../encryption/services/keyBackupService.js"></script>
+    <script src="../../encryption/services/keyManagementService.js"></script>
+    <script src="../../encryption/facade/encryptionFacade.js"></script>
+    <script src="../../encryption/facade/nullEncryptionFacade.js"></script>
+    <script src="../../encryption/encryptionModule.js"></script>
+    <script src="../../encryption/initEncryption.js"></script>
+
+    <!-- Initialize Database Module -->
+    <script src="../../database/initDatabase.js"></script>
+
+    <!-- Guards / utilities -->
+    <script src="../../shared/utils/authGuard.js"></script>
+    <script src="../../shared/utils/networkUtils.js"></script>
+    <script src="../../shared/utils/offlineHandler.js"></script>
+
+    <!-- Header Component -->
+    <script src="../../shared/header/header.js"></script>
+
+    <!-- Settings Controller -->
+    <script src="../controllers/settingsController.js"></script>
+
+    <script>
+        // Bootstrap mirrors messenger.html: init config -> services -> AuthGuard -> controller.
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('[SettingsPage] DOMContentLoaded - starting initialization');
+            try {
+                if (window.SupabaseConfig && typeof window.SupabaseConfig.initialize === 'function') {
+                    await window.SupabaseConfig.initialize();
+                }
+                if (window.AuthService && typeof window.AuthService.initialize === 'function') {
+                    await window.AuthService.initialize();
+                }
+                if (window.DatabaseService && typeof window.DatabaseService.initialize === 'function') {
+                    await window.DatabaseService.initialize();
+                }
+
+                // Enforce authentication before initializing the UI.
+                if (window.AuthGuard && typeof window.AuthGuard.checkAuth === 'function') {
+                    const authed = await window.AuthGuard.checkAuth();
+                    if (!authed) {
+                        console.log('[SettingsPage] Not authenticated — AuthGuard is redirecting.');
+                        return;
+                    }
+                } else {
+                    console.error('[SettingsPage] AuthGuard unavailable; refusing to load settings.');
+                    window.location.href = '../../auth/views/auth.html';
+                    return;
+                }
+
+                if (window.SettingsController) {
+                    await window.SettingsController.init();
+                    console.log('[SettingsPage] SettingsController initialized');
+                }
+
+                console.log('[SettingsPage] Initialization complete!');
+            } catch (error) {
+                console.error('[SettingsPage] Initialization error:', error);
+                alert('Failed to initialize the settings page. Please refresh and try again.');
+            }
+        });
+    </script>
+</body>
+</html>
