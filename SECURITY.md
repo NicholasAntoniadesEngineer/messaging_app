@@ -26,17 +26,38 @@ repository (Security → Advisories) rather than a public issue.
 - The user password is the root secret that unwraps the identity secret key; a 24-word
   recovery key is the backup unwrap path.
 
-## Known weaknesses being addressed
+## Remediation status
 
-These are tracked in `docs/SECURITY_REVIEW.md` with remediation status:
+The full audit (`docs/SECURITY_REVIEW.md`, 49 findings) is now substantially
+remediated and live across both apps (messaging_app + money_tracker, which shares
+the messaging core via the `lib/messaging` submodule).
 
-1. Crypto library is loaded from a CDN without Subresource Integrity (supply-chain risk).
-2. Identity secret key is stored unencrypted at rest in IndexedDB.
-3. The login password is briefly held in `sessionStorage` to drive key backup.
-4. Verbose logging can print key material in development builds.
-5. No server-side public-key authenticity pinning (TOFU) — MITM by a malicious server.
-6. Forward secrecy is limited (static-static ECDH; no double-ratchet) and key rotation
-   is currently disabled.
-7. No Content-Security-Policy is set on the pages.
+**Fixed & live:**
+- Crypto library **self-hosted** (no third-party CDN). *(was: no SRI)*
+- Identity secret key **encrypted at rest** with a non-extractable WebCrypto key. *(was: plaintext in IndexedDB)*
+- **TOFU public-key pinning** with warn-on-change; safety-number surfaced in settings. *(was: silent MITM)*
+- Decrypt failures **fail loud** (no silent re-derive masking tampering); null/plaintext facade fail-closed.
+- Key-material **logging stripped**; verbose logging off by default; plaintext message preview removed from notifications.
+- **Content-Security-Policy** on all pages; output **escaping** (XSS) in all render paths.
+- **RLS hardened** on the shared DB (participant-scoped attachment access, blocked-sender insert prevention, immutable attachments, authenticated-only key reads).
+- `user-lookup` and account-deletion edge functions **JWT-scoped**.
+- Attachment **type/size/expiry** validation; client **rate-limiting**; input validation; self-conversation guard.
+- Login password held in `sessionStorage` only until key setup completes (window minimized).
+- Account **nuke** (full delete) + **lost-recovery-key re-key** (no admin backdoor).
 
-See the review document for the full list, severities, and fixes.
+## Roadmap — not yet implemented
+
+1. **Forward secrecy / post-compromise security (Double Ratchet).** Today's protocol
+   is static-static ECDH (one session key per pair, epoch 0), so an identity-key
+   compromise decrypts all past/future messages for that pair. The proper fix is
+   X3DH + Double Ratchet. This is a substantial, async-correctness-heavy change
+   (out-of-order + skipped-message keys, deterministic history re-decrypt,
+   multi-device) and **must be built incrementally with real send/receive testing**,
+   or by adopting a **vetted library** (e.g. libsignal) rather than a bespoke
+   from-scratch implementation. Tracked as the top remaining item; an unverified
+   blind implementation was deliberately NOT shipped.
+2. CSP still allows `'unsafe-inline'` for scripts (the pages use inline handlers/
+   blocks); removing it requires extracting inline scripts to files or nonces.
+3. Minor: cosmetic internal `moneyTracker*` config/global renames.
+
+See `docs/SECURITY_REVIEW.md` for the finding-by-finding detail and severities.
