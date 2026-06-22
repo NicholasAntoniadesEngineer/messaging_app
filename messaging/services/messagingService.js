@@ -287,13 +287,19 @@ const MessagingService = {
                 const messagesTable = this._getTableName('messages');
                 const conversationIds = conversations.map(c => c.id);
                 const unreadResult = await db.querySelect(messagesTable, {
+                    // Only the conversation_id is needed to COUNT unread — do not pull
+                    // encrypted_content / full rows (perf-7).
+                    select: 'conversation_id',
                     filter: {
                         recipient_id: userId,
                         read: false,
                         $or: conversationIds.map(id => ({ conversation_id: id }))
                     }
                 });
-                if (unreadResult.success && unreadResult.data) {
+                // querySelect resolves to { data, count, error } — there is no `success`
+                // field, so the old `unreadResult.success` guard was ALWAYS false and
+                // unread counts were permanently 0. Guard on data presence instead.
+                if (unreadResult.data) {
                     unreadResult.data.forEach(msg => {
                         unreadCountsMap.set(msg.conversation_id, (unreadCountsMap.get(msg.conversation_id) || 0) + 1);
                     });

@@ -434,8 +434,11 @@ const KeyManagementService = {
     async restoreFromPassword(password) {
         console.log('[KeyManagementService] Restoring from password...');
 
-        await KeyStorageService.clearAll();
+        // Validate the password by decrypting the backup BEFORE destroying local state,
+        // so a wrong/stale password can never wipe a present-but-unreadable local identity
+        // (the data-loss class the recent login fix addressed).
         const secretKey = await KeyBackupService.restoreFromPassword(this.currentUserId, password);
+        await KeyStorageService.clearAll();
 
         // Derive public key from secret key to ensure cryptographic consistency
         const keyPair = CryptoPrimitivesService.keyPairFromSecretKey(secretKey);
@@ -477,8 +480,9 @@ const KeyManagementService = {
     async restoreFromRecoveryKey(recoveryKey) {
         console.log('[KeyManagementService] Restoring from recovery key...');
 
-        await KeyStorageService.clearAll();
+        // Validate the recovery key by decrypting the backup BEFORE destroying local state.
         const secretKey = await KeyBackupService.restoreFromRecoveryKey(this.currentUserId, recoveryKey);
+        await KeyStorageService.clearAll();
 
         const keyPair = CryptoPrimitivesService.keyPairFromSecretKey(secretKey);
         const publicKey = keyPair.publicKey;
