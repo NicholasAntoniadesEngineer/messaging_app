@@ -27,26 +27,12 @@ class Header {
      */
     static getCurrentPage() {
         const path = window.location.pathname;
-        const filename = path.split('/').pop() || 'index.html';
-        
-        if (filename === 'index.html' || filename === '') {
-            return 'Home';
-        } else if (filename.includes('monthlyBudget')) {
-            return 'Monthly Budget';
-        } else if (filename.includes('pots')) {
-            return 'Pots & Investments';
-        } else if (filename.includes('settings')) {
-            return 'Settings';
-        } else if (filename.includes('import')) {
-            return 'Settings';
-        } else if (filename.includes('messenger')) {
+        const filename = path.split('/').pop() || '';
+
+        if (filename.includes('messenger')) {
             return 'Messenger';
-        } else if (filename.includes('notifications')) {
-            return 'Notifications';
-        } else if (filename.includes('subscription')) {
-            return 'Upgrade';
         }
-        return 'Home';
+        return 'Secure Messenger';
     }
 
     /**
@@ -114,36 +100,6 @@ class Header {
             return '';
         }
         
-        const currentPage = this.getCurrentPage();
-        const path = window.location.pathname;
-
-        // Get all module names from registry
-        const modules = window.ModuleRegistry?.getAllModuleNames() || [];
-
-        // Check if we're in any module's views/ folder
-        const isInModuleViews = modules.some(mod => path.includes(`/${mod}/views/`));
-        const isInPaymentsViews = path.includes('/payments/views/');
-        const isInUiViews = path.includes('/ui/views/');
-        const isInMessagingViews = path.includes('/messaging/views/');
-
-        // Determine Home link based on current location
-        let homeHref;
-        if (isInModuleViews) {
-            homeHref = '../../landing/index.html';
-        } else if (isInUiViews) {
-            homeHref = '../index.html';
-        } else if (modules.some(mod => path.includes(`/${mod}/`))) {
-            homeHref = '../landing/index.html';
-        } else if (path.includes('/shared/')) {
-            homeHref = '../landing/index.html';
-        } else {
-            homeHref = 'landing/index.html';
-        }
-
-        const navItems = [];
-
-        const navLinks = '';
-
         // Get user info if authenticated
         // Be resilient to session check timeouts - check both method and direct state
         let userInfoHtml = '';
@@ -151,46 +107,12 @@ class Header {
             const methodCheck = window.AuthService.isAuthenticated();
             const directCheck = window.AuthService.currentUser !== null && window.AuthService.session !== null;
             const isAuthenticated = methodCheck || directCheck;
-            
+
             if (isAuthenticated) {
                 const user = window.AuthService.getCurrentUser() || window.AuthService.currentUser;
                 const userEmail = user?.email || 'User';
                 const userInitials = this.getUserInitials(userEmail);
-                const settingsHref = this.getModulePath('settings') + 'settings.html';
-                userInfoHtml = `
-                <div class="header-user-menu">
-                    <button class="user-avatar-button" id="user-avatar-button" aria-label="User menu" aria-expanded="false">
-                        <span class="user-initials">${userInitials}</span>
-                        <span class="avatar-notification-badge" id="avatar-notification-badge" style="display: none;">0</span>
-                    </button>
-                    <div class="user-dropdown-menu" id="user-dropdown-menu">
-                        <a href="${this.getModulePath('payments')}subscription.html" class="user-dropdown-item user-dropdown-username">
-                            <i class="fa-regular fa-user user-dropdown-icon"></i>
-                            <span>${userEmail}</span>
-                        </a>
-                        <a href="${settingsHref}" class="user-dropdown-item user-dropdown-settings">
-                            <i class="fa-regular fa-gear user-dropdown-icon"></i>
-                            <span>Settings</span>
-                        </a>
-                        <a href="${this.getModulePath('pots')}pots.html" class="user-dropdown-item user-dropdown-pots">
-                            <i class="fa-solid fa-piggy-bank user-dropdown-icon"></i>
-                            <span>Pots & Investments</span>
-                        </a>
-                        <button class="user-dropdown-item user-dropdown-notifications" id="header-notifications-button" aria-label="Notifications">
-                            <i class="fa-regular fa-bell user-dropdown-icon"></i>
-                            <span>Notifications</span>
-                            <span class="notification-count-badge" id="header-notification-count" style="display: none;">0</span>
-                        </button>
-                        <button class="user-dropdown-item user-dropdown-messenger" id="header-messenger-button" aria-label="Messenger">
-                            <i class="fa-regular fa-message user-dropdown-icon"></i>
-                            <span>Messenger</span>
-                        </button>
-                        <button class="user-dropdown-item user-dropdown-signout" id="header-signout-button" aria-label="Sign out">
-                            <i class="fa-solid fa-right-from-bracket user-dropdown-icon"></i>
-                            <span>Sign Out</span>
-                        </button>
-                    </div>
-                </div>`;
+                userInfoHtml = this._renderUserMenu(userEmail, userInitials);
             }
         }
 
@@ -198,14 +120,37 @@ class Header {
     <header class="main-header">
         <nav class="main-navigation" role="navigation" aria-label="Main navigation">
             <div class="header-title-group">
-                <h1 class="site-title" id="header-app-title" role="button" tabindex="0" aria-label="Go to home page">Money Tracker</h1>
+                <h1 class="site-title" id="header-app-title" role="button" tabindex="0" aria-label="Go to messenger">Secure Messenger</h1>
             </div>
-            <ul class="nav-list">
-                ${navLinks}
-            </ul>
             ${userInfoHtml}
         </nav>
     </header>`;
+    }
+
+    /**
+     * Render the authenticated user menu (avatar + dropdown).
+     * Standalone messenger: only the user identity + Sign Out. No dead-page links.
+     * @private
+     */
+    static _renderUserMenu(userEmail, userInitials) {
+        return `
+                <div class="header-user-menu">
+                    <button class="user-avatar-button" id="user-avatar-button" aria-label="User menu" aria-expanded="false">
+                        <span class="user-initials">${userInitials}</span>
+                        <span class="avatar-notification-badge" id="avatar-notification-badge" style="display: none;">0</span>
+                    </button>
+                    <div class="user-dropdown-menu" id="user-dropdown-menu">
+                        <div class="user-dropdown-item user-dropdown-username">
+                            <i class="fa-regular fa-user user-dropdown-icon"></i>
+                            <span>${userEmail}</span>
+                            <span class="notification-count-badge" id="header-notification-count" style="display: none;">0</span>
+                        </div>
+                        <button class="user-dropdown-item user-dropdown-signout" id="header-signout-button" aria-label="Sign out">
+                            <i class="fa-solid fa-right-from-bracket user-dropdown-icon"></i>
+                            <span>Sign Out</span>
+                        </button>
+                    </div>
+                </div>`;
     }
 
     /**
@@ -356,7 +301,8 @@ class Header {
 
     /**
      * Initialize app title click handler
-     * Redirects to landing page if authenticated, sign-in page if not
+     * Brand is the "home" of the standalone app: go to the messenger when
+     * authenticated, otherwise to the sign-in page. Never to a dead landing page.
      */
     static initAppTitleClick() {
         const appTitle = document.getElementById('header-app-title');
@@ -367,32 +313,11 @@ class Header {
             e.stopPropagation();
 
             const isAuthenticated = window.AuthService && window.AuthService.isAuthenticated();
-            const path = window.location.pathname;
-
-            // Get all module names from registry
-            const modules = window.ModuleRegistry?.getAllModuleNames() || [];
-
-            const isInModuleViews = modules.some(mod => path.includes(`/${mod}/views/`));
-            const isInUiViews = path.includes('/ui/views/');
 
             if (isAuthenticated) {
-                // Determine landing page URL based on current location (same logic as render method)
-                let landingPageUrl;
-                if (isInModuleViews) {
-                    landingPageUrl = '../../landing/index.html';
-                } else if (isInUiViews) {
-                    landingPageUrl = '../index.html';
-                } else if (modules.some(mod => path.includes(`/${mod}/`))) {
-                    landingPageUrl = '../landing/index.html';
-                } else if (path.includes('/shared/')) {
-                    landingPageUrl = '../landing/index.html';
-                } else {
-                    landingPageUrl = 'landing/index.html';
-                }
-                window.location.href = landingPageUrl;
+                window.location.href = this.getModulePath('messaging') + 'messenger.html';
             } else {
-                const authPageUrl = this.getModulePath('auth') + 'auth.html';
-                window.location.href = authPageUrl;
+                window.location.href = this.getModulePath('auth') + 'auth.html';
             }
         };
 
@@ -505,15 +430,19 @@ class Header {
     }
 
     /**
-     * Handle notification bell click
+     * Handle notification bell click.
+     * Standalone messenger has no separate notifications page, so this is a
+     * safe no-op (kept for any external reference). Never navigates.
      */
     static handleNotificationBellClick() {
-        const notificationsUrl = this.getModulePath('notifications') + 'notifications.html';
-        window.location.href = notificationsUrl;
+        // No dedicated notifications page in the standalone messenger app.
     }
 
     /**
-     * Initialize messenger button
+     * Initialize messenger button.
+     * The brand/title already links to the messenger, so there is no longer a
+     * dedicated messenger button in the rendered nav. Kept as a defensive,
+     * null-checked no-op so any external reference still resolves.
      */
     static initMessengerButton() {
         try {
@@ -1039,53 +968,18 @@ class Header {
                 
                 const userEmail = user?.email || 'User';
                 const userInitials = this.getUserInitials(userEmail);
-                const settingsHref = this.getModulePath('settings') + 'settings.html';
 
                 console.log('[Header] Adding user menu:', {
                     userEmail: userEmail,
-                    userInitials: userInitials,
-                    settingsHref: settingsHref
+                    userInitials: userInitials
                 });
-                
-                const userInfoHtml = `
-                    <div class="header-user-menu">
-                        <button class="user-avatar-button" id="user-avatar-button" aria-label="User menu" aria-expanded="false">
-                            <span class="user-initials">${userInitials}</span>
-                        <span class="avatar-notification-badge" id="avatar-notification-badge" style="display: none;">0</span>
-                        </button>
-                        <div class="user-dropdown-menu" id="user-dropdown-menu">
-                            <a href="${this.getModulePath('payments')}subscription.html" class="user-dropdown-item user-dropdown-username">
-                                <i class="fa-regular fa-user user-dropdown-icon"></i>
-                                <span>${userEmail}</span>
-                            </a>
-                            <a href="${settingsHref}" class="user-dropdown-item user-dropdown-settings">
-                                <i class="fa-regular fa-gear user-dropdown-icon"></i>
-                                <span>Settings</span>
-                            </a>
-                            <a href="${this.getModulePath('pots')}pots.html" class="user-dropdown-item user-dropdown-pots">
-                                <i class="fa-solid fa-piggy-bank user-dropdown-icon"></i>
-                                <span>Pots & Investments</span>
-                            </a>
-                        <button class="user-dropdown-item user-dropdown-notifications" id="header-notifications-button" aria-label="Notifications">
-                            <i class="fa-regular fa-bell user-dropdown-icon"></i>
-                            <span>Notifications</span>
-                            <span class="notification-count-badge" id="header-notification-count" style="display: none;">0</span>
-                        </button>
-                        <button class="user-dropdown-item user-dropdown-messenger" id="header-messenger-button" aria-label="Messenger">
-                            <i class="fa-regular fa-message user-dropdown-icon"></i>
-                            <span>Messenger</span>
-                        </button>
-                            <button class="user-dropdown-item user-dropdown-signout" id="header-signout-button" aria-label="Sign out">
-                                <i class="fa-solid fa-right-from-bracket user-dropdown-icon"></i>
-                                <span>Sign Out</span>
-                            </button>
-                        </div>
-                    </div>`;
+
+                const userInfoHtml = this._renderUserMenu(userEmail, userInitials);
                 nav.insertAdjacentHTML('beforeend', userInfoHtml);
                 this.initUserMenu();
                 this.initSignOutButton();
-                this.initNotificationBell(); // Initialize notifications button click handler
-                this.initMessengerButton(); // Initialize messenger button click handler
+                this.initNotificationBell(); // Wire (safe) message-count badge refresh
+                this.initMessengerButton(); // Kept as a defensive no-op (button absent)
 
                 // Note: updateNotificationCount and subscriptions are already set up in init()
                 // Only set up subscriptions if they haven't been set up yet

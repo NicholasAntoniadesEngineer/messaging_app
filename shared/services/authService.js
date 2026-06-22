@@ -707,13 +707,14 @@ const AuthService = {
         // This prevents Supabase from auto-restoring the session on page reload
         // Supabase stores session with keys like: sb-<project-ref>-auth-token
         try {
-            const supabaseUrl = this.client?.supabaseUrl || 'https://ofutzrxfbrgtbkyafndv.supabase.co';
-            const projectRef = supabaseUrl.split('//')[1]?.split('.')[0] || 'ofutzrxfbrgtbkyafndv';
-            const sessionKey = `sb-${projectRef}-auth-token`;
-            
-            console.log('[AuthService] Clearing Supabase session from localStorage:', sessionKey);
-            localStorage.removeItem(sessionKey);
-            
+            const supabaseUrl = this.client?.supabaseUrl || window.SupabaseConfig?.PROJECT_URL || '';
+            const projectRef = supabaseUrl.split('//')[1]?.split('.')[0] || '';
+            const sessionKey = projectRef ? `sb-${projectRef}-auth-token` : null;
+            if (sessionKey) {
+                console.log('[AuthService] Clearing Supabase session from localStorage:', sessionKey);
+                localStorage.removeItem(sessionKey);
+            }
+
             // Also clear any other Supabase-related auth keys
             const keysToRemove = [];
             for (let i = 0; i < localStorage.length; i++) {

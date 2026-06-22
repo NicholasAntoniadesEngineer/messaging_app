@@ -5,7 +5,7 @@ export default defineConfig({
   base: './',
   server: {
     port: 3000,
-    open: '/landing/index.html',
+    open: '/messaging/views/messenger.html',
     cors: true,
   },
   css: {
@@ -17,13 +17,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: 'index.html',
-        landing: 'landing/index.html',
         auth: 'auth/views/auth.html',
-        monthlyBudget: 'monthlyBudget/views/monthlyBudget.html',
-        pots: 'pots/views/pots.html',
-        settings: 'settings/views/settings.html',
-        notifications: 'notifications/views/notifications.html',
-        subscription: 'payments/views/subscription.html',
         messenger: 'messaging/views/messenger.html',
       },
     },

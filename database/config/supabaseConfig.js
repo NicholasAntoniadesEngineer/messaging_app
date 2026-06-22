@@ -1,14 +1,32 @@
 /**
  * Supabase Configuration
- * Centralized configuration for Supabase client
+ * Centralized configuration for the Supabase client.
  *
- * NOTE: Global logging configuration has been moved to shared/config/loggingConfig.js
- * Load loggingConfig.js BEFORE this file to control console logging.
+ * ============================================================================
+ * SETUP REQUIRED — point this at YOUR OWN Supabase project
+ * ============================================================================
+ * Secure Messenger is a standalone app and MUST use its own dedicated Supabase
+ * project (do not reuse another app's project).
+ *
+ *   1. Create a new project at https://supabase.com
+ *   2. Settings -> API: copy the Project URL and the publishable/anon API key
+ *   3. Replace the two placeholder values below
+ *   4. Run database/setup/messaging-schema.sql in the SQL editor
+ *   5. Create a private Storage bucket named "message-attachments" (1MB limit)
+ *   6. Deploy the user-lookup edge function (database/supabaseEdgeFunctions/)
+ *   7. Auth -> URL Configuration: set the Site URL + redirect URLs
+ *
+ * The anon/publishable key is safe to ship client-side — row-level security
+ * (RLS) in messaging-schema.sql is what actually protects the data.
+ *
+ * NOTE: Global logging configuration lives in shared/config/loggingConfig.js;
+ * load loggingConfig.js BEFORE this file to control console logging.
  */
 
 const SupabaseConfig = {
-    PROJECT_URL: 'https://ofutzrxfbrgtbkyafndv.supabase.co',
-    PUBLISHABLE_API_KEY: 'sb_publishable_yUPqP6PRjtgphcvS0--vgw_Zy3S_Urd',
+    // TODO: replace with your own Supabase project URL and publishable/anon key
+    PROJECT_URL: 'https://YOUR_PROJECT_REF.supabase.co',
+    PUBLISHABLE_API_KEY: 'YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY',
     _clientInstance: null,
     
     /**

@@ -5,7 +5,8 @@
  * Files are encrypted client-side before upload and stored in Supabase Storage.
  * Files auto-expire after 24 hours.
  *
- * Premium feature - requires messaging.attachments permission.
+ * Attachments are available to all users (no subscription gating).
+ * The only requirement is a configured Supabase Storage bucket.
  */
 
 const AttachmentService = {
@@ -91,20 +92,10 @@ const AttachmentService = {
             return { allowed: false, maxSizeBytes: 0, reason: 'Storage not configured' };
         }
 
-        if (!window.PermissionService) {
-            console.warn('[AttachmentService] PermissionService not available');
-            return { allowed: false, maxSizeBytes: 0, reason: 'Permission service unavailable' };
-        }
-
-        const access = await window.PermissionService.canAccess('messaging.attachments');
-        if (!access.allowed) {
-            return { allowed: false, maxSizeBytes: 0, reason: access.reason };
-        }
-
-        const settings = await window.PermissionService.getFileAttachmentSettings();
+        // Attachments are available to all users; the only gate is a working bucket.
         return {
             allowed: true,
-            maxSizeBytes: settings.maxSizeBytes,
+            maxSizeBytes: this.MAX_FILE_SIZE,
             reason: null
         };
     },

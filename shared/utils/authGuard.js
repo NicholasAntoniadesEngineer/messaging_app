@@ -79,93 +79,9 @@ const AuthGuard = {
             }
             
             console.log('[AuthGuard] User authenticated:', window.AuthService.getCurrentUser()?.email);
-            
-            // Check subscription status
-            console.log('[AuthGuard] ========== CHECKING SUBSCRIPTION STATUS ==========');
-            
-            // Wait for payments module initialization
-            if (window.PaymentsModuleInitPromise) {
-                console.log('[AuthGuard] Waiting for PaymentsModule initialization...');
-                try {
-                    await window.PaymentsModuleInitPromise;
-                    console.log('[AuthGuard] PaymentsModule initialization complete');
-                } catch (initError) {
-                    console.error('[AuthGuard] PaymentsModule initialization failed:', initError);
-                    // Continue anyway - let subscription check handle the error
-                }
-            } else if (window.PaymentsModule && !window.PaymentsModule.isInitialized()) {
-                // Fallback: wait for initialization if PaymentsModule exists but not initialized
-                console.log('[AuthGuard] PaymentsModule exists but not initialized, waiting...');
-                let waitCount = 0;
-                const maxWait = 50; // 5 seconds
-                while (!window.PaymentsModule.isInitialized() && waitCount < maxWait) {
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    waitCount++;
-                }
-                if (!window.PaymentsModule.isInitialized()) {
-                    console.warn('[AuthGuard] PaymentsModule not initialized after waiting');
-                } else {
-                    console.log('[AuthGuard] PaymentsModule initialized');
-                }
-            }
-            
-            if (window.SubscriptionChecker) {
-                try {
-                    console.log('[AuthGuard] SubscriptionChecker available, calling checkAccess()...');
-                    const accessCheck = await window.SubscriptionChecker.checkAccess();
-                    console.log('[AuthGuard] Subscription check result:', {
-                        hasAccess: accessCheck.hasAccess,
-                        status: accessCheck.status,
-                        error: accessCheck.error,
-                        hasDetails: !!accessCheck.details
-                    });
-                    
-                    if (!accessCheck.hasAccess) {
-                        console.log('[AuthGuard] ⚠️ User does NOT have active subscription');
-                        console.log('[AuthGuard] Subscription status:', accessCheck.status);
-                        console.log('[AuthGuard] Error (if any):', accessCheck.error);
 
-                        // Log status for debugging
-                        const statusMessage = window.SubscriptionChecker.getStatusMessage(accessCheck);
-                        console.log('[AuthGuard] Status message:', statusMessage);
-
-                        // Allow expired trial users to continue with reduced privileges
-                        // Only redirect for no_subscription (never had one) or cancelled
-                        if (accessCheck.status === 'no_subscription') {
-                            console.log('[AuthGuard] No subscription found, redirecting to payment page');
-                            this.redirectToPayment();
-                            return false;
-                        }
-
-                        // For trial_expired, subscription_expired, cancelled - allow access with reduced privileges
-                        console.log('[AuthGuard] Allowing access with reduced privileges for status:', accessCheck.status);
-                    }
-                    console.log('[AuthGuard] ✅ User has active subscription:', accessCheck.status);
-                    if (accessCheck.details?.daysRemaining !== null && accessCheck.details?.daysRemaining !== undefined) {
-                        console.log('[AuthGuard] Trial days remaining:', accessCheck.details.daysRemaining);
-                    }
-                } catch (subscriptionError) {
-                    console.error('[AuthGuard] ❌ Error checking subscription:', subscriptionError);
-                    console.error('[AuthGuard] Subscription error details:', {
-                        message: subscriptionError.message,
-                        name: subscriptionError.name,
-                        stack: subscriptionError.stack
-                    });
-                    console.warn('[AuthGuard] Error checking subscription, allowing access (fail-open):', subscriptionError);
-                }
-            } else {
-                console.warn('[AuthGuard] SubscriptionChecker not available, skipping subscription check');
-            }
-            console.log('[AuthGuard] ========== SUBSCRIPTION CHECK COMPLETE ==========');
-
-            // Initialize PermissionService
-            if (window.PermissionService) {
-                console.log('[AuthGuard] Initializing PermissionService...');
-                await window.PermissionService.initialize();
-                console.log('[AuthGuard] PermissionService initialized');
-            } else {
-                console.warn('[AuthGuard] PermissionService not available');
-            }
+            // Secure Messenger is ungated: no subscription/permission tier checks.
+            // Access is governed purely by authentication + Supabase row-level security.
 
             return true;
         } catch (error) {

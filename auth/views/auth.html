@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Money Tracker - Sign In</title>
+    <title>Secure Messenger - Sign In</title>
     <link rel="stylesheet" href="../../shared/vendor/font-awesome/css/all.min.css">
     <link rel="stylesheet" href="../../shared/styles/main-compiled.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <script>
         (function() {
             var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
-            var s = localStorage.getItem('money_tracker_fontScale') || 'medium';
+            var s = localStorage.getItem('secure_messenger_fontScale') || 'medium';
             document.documentElement.style.fontSize = (m[s] || 16) + 'px';
         })();
     </script>
@@ -19,9 +19,9 @@
     <main class="auth-card" role="main">
         <header class="auth-header">
             <div class="auth-logo">
-                <i class="fas fa-wallet"></i>
+                <i class="fas fa-shield-halved"></i>
             </div>
-            <h1 class="auth-title">Money Tracker</h1>
+            <h1 class="auth-title">Secure Messenger</h1>
         </header>
 
         <section class="auth-body">
@@ -264,17 +264,7 @@
     <!-- Messaging Service -->
     <script src="../../messaging/services/messagingService.js"></script>
 
-    <!-- Payments Module -->
-    <script src="../../payments/config/paymentsConfigBase.js"></script>
-    <script src="../../payments/config/moneyTrackerConfig.js"></script>
-    <script src="../../payments/utils/configHelper.js"></script>
-    <script src="../../payments/paymentsModule.js"></script>
-    <script src="../../payments/services/stripeService.js"></script>
-    <script src="../../payments/services/paymentService.js"></script>
-    <script src="../../payments/services/subscriptionService.js"></script>
-    <script src="../../payments/utils/subscriptionChecker.js"></script>
-    <script src="../../payments/initPayments.js"></script>
-    <script src="../../payments/utils/waitForPaymentsInit.js"></script>
+    <!-- Payments / subscription stack removed: Secure Messenger is standalone and ungated -->
 
     <!-- E2E Encryption Module -->
     <script src="../../encryption/config/encryptionConfigBase.js"></script>
@@ -526,18 +516,18 @@
                 };
 
                 downloadBtn.onclick = () => {
-                    const blob = new Blob([`Money Tracker Recovery Key\n\nSave these 24 words in a safe place:\n\n${currentRecoveryKey}\n\nDate: ${new Date().toISOString()}\n\nIMPORTANT: This is the ONLY way to recover your data if you forget your password.`], { type: 'text/plain' });
+                    const blob = new Blob([`Secure Messenger Recovery Key\n\nSave these 24 words in a safe place:\n\n${currentRecoveryKey}\n\nDate: ${new Date().toISOString()}\n\nIMPORTANT: This is the ONLY way to recover your encrypted messages if you forget your password.`], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `money-tracker-recovery-key-${Date.now()}.txt`;
+                    a.download = `secure-messenger-recovery-key-${Date.now()}.txt`;
                     a.click();
                     URL.revokeObjectURL(url);
                 };
 
                 printBtn.onclick = () => {
                     const printWindow = window.open('', '_blank');
-                    printWindow.document.write(`<html><head><title>Money Tracker Recovery Key</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#333;}.recovery-key{font-family:'Courier New',monospace;font-size:16px;line-height:2;background:#f5f5f5;padding:20px;border:2px solid #333;margin:20px 0;}.warning{color:#d32f2f;font-weight:bold;}</style></head><body><h1>Money Tracker Recovery Key</h1><p class="warning">KEEP THIS SAFE AND SECURE</p><p>If you forget your password, these 24 words are the ONLY way to recover your data.</p><div class="recovery-key">${currentRecoveryKey}</div><p>Date: ${new Date().toISOString()}</p></body></html>`);
+                    printWindow.document.write(`<html><head><title>Secure Messenger Recovery Key</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#333;}.recovery-key{font-family:'Courier New',monospace;font-size:16px;line-height:2;background:#f5f5f5;padding:20px;border:2px solid #333;margin:20px 0;}.warning{color:#d32f2f;font-weight:bold;}</style></head><body><h1>Secure Messenger Recovery Key</h1><p class="warning">KEEP THIS SAFE AND SECURE</p><p>If you forget your password, these 24 words are the ONLY way to recover your encrypted messages.</p><div class="recovery-key">${currentRecoveryKey}</div><p>Date: ${new Date().toISOString()}</p></body></html>`);
                     printWindow.document.close();
                     printWindow.print();
                 };
@@ -584,7 +574,7 @@
             document.getElementById('encryption-progress-view').classList.add('hidden');
             document.getElementById('encryption-success-view').classList.remove('hidden');
             setTimeout(() => {
-                window.location.href = '../../landing/index.html';
+                window.location.href = '../../messaging/views/messenger.html';
             }, 1000);
         }
 
@@ -596,7 +586,7 @@
 
                 const currentUser = window.AuthService.getCurrentUser();
                 if (!currentUser) {
-                    window.location.href = '../../landing/index.html';
+                    window.location.href = '../../messaging/views/messenger.html';
                     return;
                 }
 
@@ -605,7 +595,7 @@
 
                 if (keys && keys.publicKey && keys.secretKey) {
                     console.log('[Auth] Encryption keys found locally - redirecting');
-                    window.location.href = '../../landing/index.html';
+                    window.location.href = '../../messaging/views/messenger.html';
                     return;
                 }
 
@@ -623,7 +613,7 @@
                     await window.KeyManagementService.restoreFromPassword(password);
                     window.PasswordManager?.clear();
                     console.log('[Auth] Keys restored successfully - redirecting');
-                    window.location.href = '../../landing/index.html';
+                    window.location.href = '../../messaging/views/messenger.html';
                 } catch (restoreError) {
                     console.log('[Auth] Password restore failed:', restoreError.message);
                     if (restoreError.message && restoreError.message.includes('No password backup found')) {
@@ -948,7 +938,7 @@
                         await window.KeyManagementService.restoreFromPassword(newPassword);
                         // Unlikely but possible if password unchanged
                         window.PasswordManager?.clear();
-                        window.location.href = '../../landing/index.html';
+                        window.location.href = '../../messaging/views/messenger.html';
                     } catch (restoreError) {
                         console.log('[Auth] Password restore failed after reset (expected):', restoreError.message);
                         // Show recovery key input
@@ -1014,7 +1004,7 @@
 
                 showSuccess('recovery-restore-success', 'Keys restored successfully! Redirecting...');
                 setTimeout(() => {
-                    window.location.href = '../../landing/index.html';
+                    window.location.href = '../../messaging/views/messenger.html';
                 }, 1000);
 
             } catch (error) {

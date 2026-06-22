@@ -7,7 +7,6 @@ const MessengerController = {
     currentConversationId: null,
     // Performance optimizations
     emailCache: new Map(), // Cache user emails to avoid repeated lookups
-    shareCache: new Map(), // Cache share details to avoid repeated queries
     enableVerboseLogging: false, // Set to true for debugging
     conversations: [],
     // Loading guards to prevent duplicate concurrent calls
@@ -157,15 +156,10 @@ const MessengerController = {
     setupEventListeners() {
         const newMessageButton = document.getElementById('new-message-button');
         const sendMessageButton = document.getElementById('send-message-button');
-        const shareDataButton = document.getElementById('share-data-button');
         const newMessageModal = document.getElementById('new-message-modal');
         const closeNewMessageModal = document.getElementById('close-new-message-modal');
         const cancelNewMessageButton = document.getElementById('cancel-new-message-button');
         const sendNewMessageButton = document.getElementById('send-new-message-button');
-        const shareDataModal = document.getElementById('share-data-modal');
-        const closeShareDataModal = document.getElementById('close-share-data-modal');
-        const cancelShareDataButton = document.getElementById('cancel-share-data-button');
-        const saveShareDataButton = document.getElementById('save-share-data-button');
 
         // New message modal
         if (newMessageButton) {
@@ -251,41 +245,6 @@ const MessengerController = {
                 const userEmail = addFriendConversationBtn.dataset.userEmail;
                 if (userId) {
                     this.handleAddFriendFromConversation(userId, userEmail, addFriendConversationBtn);
-                }
-            });
-        }
-
-        // Share data button
-        if (shareDataButton) {
-            shareDataButton.addEventListener('click', () => {
-                this.handleShareDataClick();
-            });
-        }
-
-        // Share data modal
-        if (closeShareDataModal) {
-            closeShareDataModal.addEventListener('click', () => {
-                this.hideShareDataModal();
-            });
-        }
-
-        if (cancelShareDataButton) {
-            cancelShareDataButton.addEventListener('click', () => {
-                this.hideShareDataModal();
-            });
-        }
-
-        if (saveShareDataButton) {
-            saveShareDataButton.addEventListener('click', () => {
-                this.handleSaveShareData();
-            });
-        }
-
-        // Close share data modal when clicking outside
-        if (shareDataModal) {
-            shareDataModal.addEventListener('click', (e) => {
-                if (e.target === shareDataModal) {
-                    this.hideShareDataModal();
                 }
             });
         }
@@ -540,11 +499,7 @@ const MessengerController = {
         // Clear any selected attachment
         this.clearSelectedAttachment();
 
-        // Hide share data button and attachment button
-        const shareDataButton = document.getElementById('share-data-button');
-        if (shareDataButton) {
-            shareDataButton.style.display = 'none';
-        }
+        // Hide attachment button
         const attachFileButton = document.getElementById('attach-file-button');
         if (attachFileButton) {
             attachFileButton.style.display = 'none';
@@ -595,12 +550,6 @@ const MessengerController = {
             messageThreadContainer.style.display = 'block';
             messageThread.innerHTML = '<p>Loading messages...</p>';
             if (messengerControls) messengerControls.style.display = 'none';
-
-            // Show share data button
-            const shareDataButton = document.getElementById('share-data-button');
-            if (shareDataButton) {
-                shareDataButton.style.display = 'inline-block';
-            }
 
             // Show attachment button based on permissions
             await this.updateAttachmentButtonVisibility();
@@ -678,27 +627,6 @@ const MessengerController = {
                 }
 
                 await this.renderMessageThread(messages);
-                
-                // Create messages for shares in background (non-blocking)
-                // This will update the conversation if new share messages are created
-                this.createMessagesForShares(conversationId, conversation, messages).then(sharesCreated => {
-                    if (sharesCreated > 0) {
-                        // Reload and re-render if new messages were created
-                        window.DatabaseService.getMessages(conversationId).then(updatedResult => {
-                            if (updatedResult.success && updatedResult.messages) {
-                                this.renderMessageThread(updatedResult.messages);
-                            }
-                        }).catch(error => {
-                            if (this.enableVerboseLogging) {
-                                console.warn('[MessengerController] Error reloading messages after share creation:', error);
-                            }
-                        });
-                    }
-                }).catch(error => {
-                    if (this.enableVerboseLogging) {
-                        console.warn('[MessengerController] Error creating share messages:', error);
-                    }
-                });
 
                 // Do all the read/update operations in parallel (non-blocking for UI)
                 Promise.all([
@@ -1105,248 +1033,6 @@ const MessengerController = {
     },
 
     /**
-     * Create messages for shares that don't have messages yet
-     * This includes all shares (pending, accepted, declined) to show full history
-     */
-    async createMessagesForShares(conversationId, conversation, existingMessages) {
-        if (this.enableVerboseLogging) {
-            console.log('[MessengerController] createMessagesForShares() started', { conversationId, messageCount: existingMessages.length });
-        }
-        
-        try {
-            if (typeof window.DatabaseService === 'undefined') {
-                console.warn('[MessengerController] DatabaseService not available');
-                return 0;
-            }
-
-            const currentUserId = await window.DatabaseService._getCurrentUserId();
-            if (!currentUserId) {
-                console.warn('[MessengerController] Current user ID not available');
-                return 0;
-            }
-
-            const otherUserId = conversation.other_user_id;
-            if (!otherUserId) {
-                console.warn('[MessengerController] No other_user_id in conversation');
-                return 0;
-            }
-
-            // Find all shares between current user and other user (regardless of status)
-            // This includes shares that might not have conversation_id set yet
-            const tableName = window.DatabaseService._getTableName('dataShares');
-            
-            // Run all three queries in parallel for better performance
-            const [sharesResult1, sharesResult2, sharesResult3] = await Promise.all([
-                // Query for shares with conversation_id matching (all statuses)
-                window.DatabaseService.querySelect(tableName, {
-                    filter: {
-                        conversation_id: conversationId
-                    }
-                }),
-                // Query for shares where current user is owner and other user is recipient (without conversation_id)
-                window.DatabaseService.querySelect(tableName, {
-                    filter: {
-                        owner_user_id: currentUserId,
-                        shared_with_user_id: otherUserId
-                    }
-                }),
-                // Query for shares where other user is owner and current user is recipient (without conversation_id)
-                window.DatabaseService.querySelect(tableName, {
-                    filter: {
-                        owner_user_id: otherUserId,
-                        shared_with_user_id: currentUserId
-                    }
-                })
-            ]);
-
-            // Combine results and filter for shares without conversation_id (to avoid duplicates)
-            let allRawShares = [];
-            if (sharesResult1.data && !sharesResult1.error) {
-                allRawShares = [...allRawShares, ...sharesResult1.data];
-            }
-            if (sharesResult2.data && !sharesResult2.error) {
-                // Only include shares that don't have conversation_id (to avoid duplicates with sharesResult1)
-                const sharesWithoutConversationId = sharesResult2.data.filter(share => 
-                    !share.conversation_id || share.conversation_id === null
-                );
-                allRawShares = [...allRawShares, ...sharesWithoutConversationId];
-            }
-            if (sharesResult3.data && !sharesResult3.error) {
-                // Only include shares that don't have conversation_id (to avoid duplicates with sharesResult1)
-                const sharesWithoutConversationId = sharesResult3.data.filter(share => 
-                    !share.conversation_id || share.conversation_id === null
-                );
-                allRawShares = [...allRawShares, ...sharesWithoutConversationId];
-            }
-
-            // Remove duplicates based on share.id
-            const uniqueShares = [];
-            const seenIds = new Set();
-            for (const share of allRawShares) {
-                if (!seenIds.has(share.id)) {
-                    seenIds.add(share.id);
-                    uniqueShares.push(share);
-                }
-            }
-
-            const allShares = uniqueShares;
-
-            // Update shares that don't have conversation_id set (in parallel)
-            const sharesToUpdate = allShares.filter(share => !share.conversation_id || share.conversation_id === null);
-            if (sharesToUpdate.length > 0) {
-                await Promise.all(sharesToUpdate.map(async (share) => {
-                    try {
-                        const updateResult = await window.DatabaseService.queryUpdate(tableName, share.id, {
-                            conversation_id: conversationId
-                        });
-                        if (updateResult.success || !updateResult.error) {
-                            share.conversation_id = conversationId;
-                        }
-                    } catch (error) {
-                        if (this.enableVerboseLogging) {
-                            console.warn('[MessengerController] Error updating share conversation_id:', share.id, error);
-                        }
-                    }
-                }));
-            }
-
-            // Check which shares already have messages
-            const existingShareIds = new Set();
-            existingMessages.forEach(msg => {
-                if (msg.content && msg.content.startsWith('📤 Share Request')) {
-                    const shareIdMatch = msg.content.match(/Share ID: (\d+)/);
-                    if (shareIdMatch) {
-                        const shareId = parseInt(shareIdMatch[1], 10);
-                        existingShareIds.add(shareId);
-                    }
-                }
-            });
-
-            // Create messages for shares that don't have messages yet (regardless of status)
-            // Process in parallel for better performance
-            const sharesToCreateMessages = allShares.filter(share => !existingShareIds.has(share.id));
-            const messagePromises = sharesToCreateMessages.map(async (share) => {
-                try {
-                    // Parse shared_months
-                    let parsedSharedMonths = [];
-                    if (share.shared_months) {
-                        if (typeof share.shared_months === 'string') {
-                            try {
-                                parsedSharedMonths = JSON.parse(share.shared_months);
-                            } catch (e) {
-                                if (this.enableVerboseLogging) {
-                                    console.warn('[MessengerController] Error parsing shared_months:', e);
-                                }
-                            }
-                        } else {
-                            parsedSharedMonths = share.shared_months;
-                        }
-                    }
-                    
-                    // Format share details for the message
-                    const monthsList = parsedSharedMonths.map(m => {
-                        if (m.type === 'range') {
-                            return `${m.startMonth}/${m.startYear} - ${m.endMonth}/${m.endYear}`;
-                        } else {
-                            return `${m.month}/${m.year}`;
-                        }
-                    }).join(', ') || (share.share_all_data ? 'All months' : 'None');
-                    
-                    // Include status in message if not pending
-                    const statusText = share.status !== 'pending' ? `\nStatus: ${share.status.charAt(0).toUpperCase() + share.status.slice(1)}` : '';
-                    
-                    const shareMessageContent = `📤 Share Request\n\n` +
-                        `Access Level: ${share.access_level}\n` +
-                        `Months: ${monthsList}\n` +
-                        `${(share.shared_pots || share.share_all_data) ? 'Pots: Yes\n' : ''}` +
-                        `${(share.shared_settings || share.share_all_data) ? 'Settings: Yes\n' : ''}` +
-                        `${statusText}\n` +
-                        `\nShare ID: ${share.id}`;
-                    
-                    // Determine sender and recipient
-                    const senderId = share.owner_user_id;
-                    const recipientId = share.shared_with_user_id;
-                    
-                    if (typeof window.MessagingService !== 'undefined') {
-                        const messageResult = await window.MessagingService.sendMessage(
-                            conversationId,
-                            senderId,
-                            recipientId,
-                            shareMessageContent
-                        );
-                        
-                        return messageResult.success ? 1 : 0;
-                    }
-                    return 0;
-                } catch (error) {
-                    if (this.enableVerboseLogging) {
-                        console.error('[MessengerController] Error creating message for share:', share.id, error);
-                    }
-                    return 0;
-                }
-            });
-            
-            const results = await Promise.all(messagePromises);
-            const messagesCreated = results.reduce((sum, count) => sum + count, 0);
-            const messagesSkipped = allShares.length - sharesToCreateMessages.length;
-            
-            if (this.enableVerboseLogging && messagesCreated > 0) {
-                console.log('[MessengerController] createMessagesForShares complete:', { created: messagesCreated, skipped: messagesSkipped });
-            }
-            return messagesCreated;
-        } catch (error) {
-            console.error('[MessengerController] createMessagesForShares() failed:', error);
-            return 0;
-        }
-    },
-
-    /**
-     * Batch fetch share details for multiple share IDs
-     */
-    async batchFetchShareDetails(shareIds) {
-        const uniqueShareIds = [...new Set(shareIds.filter(id => id !== null && id !== undefined))];
-        const uncachedShareIds = uniqueShareIds.filter(id => !this.shareCache.has(id));
-        
-        if (uncachedShareIds.length === 0) {
-            return; // All shares already cached
-        }
-
-        if (typeof window.DatabaseService === 'undefined') {
-            return;
-        }
-
-        const tableName = window.DatabaseService._getTableName('dataShares');
-        
-        // Fetch all uncached shares in parallel
-        const sharePromises = uncachedShareIds.map(async (shareId) => {
-            try {
-                const shareResult = await window.DatabaseService.querySelect(tableName, {
-                    filter: { id: shareId },
-                    limit: 1
-                });
-                
-                if (shareResult.data && shareResult.data.length > 0 && !shareResult.error) {
-                    this.shareCache.set(shareId, shareResult.data[0]);
-                } else {
-                    this.shareCache.set(shareId, null);
-                }
-            } catch (error) {
-                this.shareCache.set(shareId, null);
-            }
-        });
-
-        await Promise.all(sharePromises);
-    },
-
-    /**
-     * Get share from cache
-     */
-    getShareFromCache(shareId) {
-        if (!shareId) return null;
-        return this.shareCache.get(shareId) || null;
-    },
-
-    /**
      * Batch fetch user emails for multiple user IDs
      */
     async batchFetchUserEmails(userIds) {
@@ -1385,13 +1071,13 @@ const MessengerController = {
     },
 
     /**
-     * Render message thread with messages (including share request messages)
+     * Render message thread with messages
      */
     async renderMessageThread(messages) {
         if (this.enableVerboseLogging) {
             console.log('[MessengerController] renderMessageThread() called', { messageCount: messages.length });
         }
-        
+
         const messageThread = document.getElementById('message-thread');
         if (!messageThread) {
             console.warn('[MessengerController] message-thread element not found');
@@ -1399,337 +1085,79 @@ const MessengerController = {
         }
 
         const currentUserId = await window.DatabaseService?._getCurrentUserId?.() || null;
-        
+
         // Reverse messages to show oldest first
         const sortedMessages = [...messages].reverse();
-
-        // Identify all share request messages and batch fetch their share details
-        const shareIds = [];
-        sortedMessages.forEach(msg => {
-            if (msg.content && msg.content.startsWith('📤 Share Request')) {
-                const shareIdMatch = msg.content.match(/Share ID: (\d+)/);
-                if (shareIdMatch) {
-                    shareIds.push(parseInt(shareIdMatch[1], 10));
-                }
-            }
-        });
-
-        // Batch fetch all share details before rendering
-        if (shareIds.length > 0) {
-            await this.batchFetchShareDetails(shareIds);
-        }
 
         // Batch fetch all sender emails
         const senderIds = [...new Set(sortedMessages.map(m => m.sender_id).filter(id => id))];
         await this.batchFetchUserEmails(senderIds);
 
         // Render messages
-        let shareRequestMessageCount = 0;
-        let regularMessageCount = 0;
-        
         const itemsHtmlPromises = sortedMessages.map(async (msg, index) => {
             const isOwnMessage = msg.sender_id === currentUserId;
-            const alignClass = isOwnMessage ? 'right' : 'left';
             const date = new Date(msg.created_at);
             const dateString = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-            // Check if this is a share request message (starts with "📤 Share Request")
-            const isShareRequest = msg.content && msg.content.startsWith('📤 Share Request');
-            
-            if (isShareRequest) {
-                shareRequestMessageCount++;
-                
-                // Parse share ID from message content
-                const shareIdMatch = msg.content.match(/Share ID: (\d+)/);
-                const shareId = shareIdMatch ? parseInt(shareIdMatch[1], 10) : null;
-                
-                let share = null;
-                let actionButtons = '';
-                
-                if (shareId) {
-                    // Get share from cache (already fetched in batch)
-                    share = this.getShareFromCache(shareId);
-                    
-                    if (share) {
-                        // Parse shared_months if it's a string
-                        if (typeof share.shared_months === 'string') {
-                            try {
-                                share.shared_months = JSON.parse(share.shared_months);
-                            } catch (e) {
-                                if (this.enableVerboseLogging) {
-                                    console.warn('[MessengerController] Error parsing shared_months:', e);
-                                }
-                                share.shared_months = [];
-                            }
-                        }
-                        
-                        // Show action buttons if share is pending and current user is recipient
-                        if (share.status === 'pending' && share.shared_with_user_id === currentUserId) {
-                            actionButtons = `
-                                <div style="margin-top: var(--spacing-sm); display: flex; gap: var(--spacing-xs); flex-wrap: wrap; max-width: 100%;">
-                                    <button class="btn btn-sm btn-primary accept-share-conversation-btn" data-share-id="${share.id}" style="flex: 0 1 auto; min-width: 0; max-width: 100%;">Accept</button>
-                                    <button class="btn btn-sm btn-secondary decline-share-conversation-btn" data-share-id="${share.id}" style="flex: 0 1 auto; min-width: 0; max-width: 100%;">Decline</button>
-                                    <button class="btn btn-sm btn-danger block-user-conversation-share-btn" data-user-id="${share.owner_user_id}" style="flex: 0 1 auto; min-width: 0; max-width: 100%;">Block</button>
-                                </div>
-                            `;
-                        } else if (share.status !== 'pending') {
-                            // Show status for non-pending shares
-                            const statusText = share.status === 'accepted' ? 'Accepted' : share.status === 'declined' ? 'Declined' : share.status;
-                            actionButtons = `<div style="margin-top: var(--spacing-sm); color: var(--text-color-secondary);"><strong>Status:</strong> ${statusText}</div>`;
-                        }
-                    }
-                }
-                
-                // Render share request as a special message
-                const shareRequestHtml = `
-                    <div class="message-item share-request-message ${alignClass}" style="margin-bottom: var(--spacing-md); text-align: ${alignClass};">
-                        <div style="display: inline-block; max-width: 80%; padding: var(--spacing-md); background: ${isOwnMessage ? 'var(--primary-color)' : 'var(--hover-overlay)'}; border: 2px solid ${isOwnMessage ? 'rgba(255,255,255,0.3)' : 'var(--primary-color)'}; border-radius: var(--border-radius); color: ${isOwnMessage ? 'white' : 'var(--text-color)'};">
-                            <div style="white-space: pre-line; font-size: 0.9rem;">${msg.content.replace(/Share ID: \d+/, '').trim()}</div>
-                            ${actionButtons}
-                            <div style="font-size: 0.75rem; margin-top: var(--spacing-sm); opacity: 0.7;">${dateString}</div>
-                        </div>
-                    </div>
-                `;
-                return shareRequestHtml;
-            } else {
-                // Regular message - use cached email
-                regularMessageCount++;
-                const senderEmail = this.getUserEmail(msg.sender_id);
+            // Regular message - use cached email
+            const senderEmail = this.getUserEmail(msg.sender_id);
 
-                // Build attachment HTML if attachments exist
-                let attachmentsHtml = '';
-                const attachments = msg.attachments || [];
-                if (attachments.length > 0) {
-                    const attachmentItems = attachments.map(att => {
-                        const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
-                        const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
-                        const fileName = att.fileName || att.file_name || 'Attachment';
-                        const attId = att.id;
-                        return `
-                            <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
-                                <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
-                                <div style="flex: 1; min-width: 0;">
-                                    <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${fileName}</div>
-                                    <div style="font-size: 0.75em; opacity: 0.7;">${fileSize}</div>
-                                </div>
-                                <i class="fas fa-download" style="opacity: 0.6;"></i>
+            // Build attachment HTML if attachments exist
+            let attachmentsHtml = '';
+            const attachments = msg.attachments || [];
+            if (attachments.length > 0) {
+                const attachmentItems = attachments.map(att => {
+                    const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
+                    const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
+                    const fileName = att.fileName || att.file_name || 'Attachment';
+                    const attId = att.id;
+                    return `
+                        <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
+                            <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${fileName}</div>
+                                <div style="font-size: 0.75em; opacity: 0.7;">${fileSize}</div>
                             </div>
-                        `;
-                    }).join('');
-                    attachmentsHtml = `<div class="message-attachments">${attachmentItems}</div>`;
-                }
-
-                // Build debug info HTML if debug mode is enabled
-                let debugInfoHtml = '';
-                if (window.ENCRYPTION_DEBUG_MODE && msg._debugInfo) {
-                    const debug = msg._debugInfo;
-                    const statusColor = debug.decryptSuccess ? '#4CAF50' : '#F44336';
-                    const statusIcon = debug.decryptSuccess ? '✓' : '✗';
-                    debugInfoHtml = `
-                        <div class="message-debug-info" style="font-size: 0.7rem; margin-top: var(--spacing-sm); padding: var(--spacing-xs); background: rgba(0,0,0,0.15); border-radius: 4px; font-family: monospace;">
-                            <div style="color: ${statusColor}; font-weight: bold;">${statusIcon} Decryption: ${debug.decryptSuccess ? 'Success' : 'Failed'}</div>
-                            ${debug.decryptError ? `<div style="color: #F44336;">Error: ${debug.decryptError}</div>` : ''}
-                            <div>Epoch: ${debug.epoch}</div>
-                            <div>Counter: ${debug.counter !== undefined ? debug.counter : 'N/A'}</div>
-                            <div>Message ID: ${debug.messageId}</div>
-                            <div>Ciphertext: ${debug.ciphertextLength} chars</div>
-                            <div>Nonce: ${debug.nonceLength} chars</div>
+                            <i class="fas fa-download" style="opacity: 0.6;"></i>
                         </div>
                     `;
-                }
+                }).join('');
+                attachmentsHtml = `<div class="message-attachments">${attachmentItems}</div>`;
+            }
 
-                return `
-                    <div class="message-item ${isOwnMessage ? 'own-message' : ''}">
-                        <div class="message-sender">${senderEmail}</div>
-                        <div class="message-content">${msg.content}</div>
-                        ${attachmentsHtml}
-                        <div class="message-timestamp">${dateString}</div>
-                        ${debugInfoHtml}
+            // Build debug info HTML if debug mode is enabled
+            let debugInfoHtml = '';
+            if (window.ENCRYPTION_DEBUG_MODE && msg._debugInfo) {
+                const debug = msg._debugInfo;
+                const statusColor = debug.decryptSuccess ? '#4CAF50' : '#F44336';
+                const statusIcon = debug.decryptSuccess ? '✓' : '✗';
+                debugInfoHtml = `
+                    <div class="message-debug-info" style="font-size: 0.7rem; margin-top: var(--spacing-sm); padding: var(--spacing-xs); background: rgba(0,0,0,0.15); border-radius: 4px; font-family: monospace;">
+                        <div style="color: ${statusColor}; font-weight: bold;">${statusIcon} Decryption: ${debug.decryptSuccess ? 'Success' : 'Failed'}</div>
+                        ${debug.decryptError ? `<div style="color: #F44336;">Error: ${debug.decryptError}</div>` : ''}
+                        <div>Epoch: ${debug.epoch}</div>
+                        <div>Counter: ${debug.counter !== undefined ? debug.counter : 'N/A'}</div>
+                        <div>Message ID: ${debug.messageId}</div>
+                        <div>Ciphertext: ${debug.ciphertextLength} chars</div>
+                        <div>Nonce: ${debug.nonceLength} chars</div>
                     </div>
                 `;
             }
+
+            return `
+                <div class="message-item ${isOwnMessage ? 'own-message' : ''}">
+                    <div class="message-sender">${senderEmail}</div>
+                    <div class="message-content">${msg.content}</div>
+                    ${attachmentsHtml}
+                    <div class="message-timestamp">${dateString}</div>
+                    ${debugInfoHtml}
+                </div>
+            `;
         });
-        
+
         const itemsHtml = await Promise.all(itemsHtmlPromises);
         messageThread.innerHTML = itemsHtml.join('');
         messageThread.scrollTop = messageThread.scrollHeight;
-        
-        // Setup event listeners for share action buttons
-        this.setupShareRequestListeners();
-    },
-
-    /**
-     * Setup event listeners for share request buttons in conversation view
-     */
-    setupShareRequestListeners() {
-        const messageThread = document.getElementById('message-thread');
-        if (!messageThread) {
-            return;
-        }
-
-        messageThread.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('accept-share-conversation-btn')) {
-                e.stopPropagation();
-                const shareId = parseInt(e.target.dataset.shareId, 10);
-                if (shareId) {
-                    await this.handleAcceptShare(shareId);
-                    // Refresh conversation to show updated share status
-                    if (this.currentConversationId) {
-                        await this.openConversation(this.currentConversationId);
-                    }
-                }
-            }
-
-            if (e.target.classList.contains('decline-share-conversation-btn')) {
-                e.stopPropagation();
-                const shareId = parseInt(e.target.dataset.shareId, 10);
-                if (shareId) {
-                    await this.handleDeclineShare(shareId);
-                    // Refresh conversation to show updated share status
-                    if (this.currentConversationId) {
-                        await this.openConversation(this.currentConversationId);
-                    }
-                }
-            }
-
-            if (e.target.classList.contains('block-user-conversation-share-btn')) {
-                e.stopPropagation();
-                const userId = e.target.dataset.userId;
-                if (userId) {
-                    await this.handleBlockUser(userId);
-                    // Refresh conversation
-                    if (this.currentConversationId) {
-                        await this.openConversation(this.currentConversationId);
-                    }
-                }
-            }
-        });
-    },
-
-    /**
-     * Handle accept share
-     */
-    async handleAcceptShare(shareId, notificationId) {
-
-        try {
-            if (typeof window.DatabaseService === 'undefined') {
-                throw new Error('DatabaseService not available');
-            }
-
-            const result = await window.DatabaseService.updateShareStatus(shareId, 'accepted');
-
-            if (result.success) {
-                // Mark all notifications for this share as read
-                if (typeof window.NotificationService !== 'undefined' && typeof window.DatabaseService !== 'undefined') {
-                    const currentUserId = await window.DatabaseService._getCurrentUserId();
-                    if (currentUserId) {
-                        await window.NotificationService.markShareNotificationsAsRead(currentUserId, shareId);
-                    }
-
-                    // Also try to delete the specific notification if provided
-                    if (notificationId) {
-                        const deleteResult = await window.NotificationService.deleteNotification(notificationId);
-                        if (!deleteResult.success) {
-                            console.warn('[MessengerController] Failed to delete notification after accepting share:', deleteResult.error);
-                        }
-                    }
-                }
-
-                // Update notification count in header
-                if (typeof window.Header !== 'undefined') {
-                    window.Header.updateNotificationCount();
-                }
-
-                alert('Share accepted successfully');
-            } else {
-                throw new Error(result.error || 'Failed to accept share');
-            }
-        } catch (error) {
-            console.error('[MessengerController] Error accepting share:', error);
-            alert('Error accepting share: ' + error.message);
-        }
-    },
-
-    /**
-     * Handle decline share
-     */
-    async handleDeclineShare(shareId, notificationId) {
-
-        try {
-            if (typeof window.DatabaseService === 'undefined') {
-                throw new Error('DatabaseService not available');
-            }
-
-            // First, check the current share status to prevent invalid transitions
-            const tableName = window.DatabaseService._getTableName('dataShares');
-            const shareResult = await window.DatabaseService.querySelect(tableName, {
-                filter: { id: shareId },
-                limit: 1
-            });
-
-            if (shareResult.error || !shareResult.data || shareResult.data.length === 0) {
-                throw new Error('Share not found');
-            }
-
-            const share = shareResult.data[0];
-
-            // Check if share is already declined
-            if (share.status === 'declined') {
-                alert('This share has already been declined. You can only re-accept it.');
-                return;
-            }
-
-            // Check if share is blocked
-            if (share.status === 'blocked') {
-                alert('This share has been blocked and cannot be updated.');
-                return;
-            }
-
-            const result = await window.DatabaseService.updateShareStatus(shareId, 'declined');
-
-            if (result.success) {
-                // Mark all notifications for this share as read
-                if (typeof window.NotificationService !== 'undefined' && typeof window.DatabaseService !== 'undefined') {
-                    const currentUserId = await window.DatabaseService._getCurrentUserId();
-                    if (currentUserId) {
-                        await window.NotificationService.markShareNotificationsAsRead(currentUserId, shareId);
-                    }
-
-                    // Also try to delete the specific notification if provided
-                    if (notificationId) {
-                        const deleteResult = await window.NotificationService.deleteNotification(notificationId);
-                        if (!deleteResult.success) {
-                            console.warn('[MessengerController] Failed to delete notification after declining share:', deleteResult.error);
-                        }
-                    }
-                }
-                
-                // Update notification count in header
-                if (typeof window.Header !== 'undefined') {
-                    window.Header.updateNotificationCount();
-                }
-                
-                alert('Share declined');
-            } else {
-                // Handle specific error messages
-                const errorMessage = result.error || 'Failed to decline share';
-                if (errorMessage.includes('Declined shares can only be re-accepted')) {
-                    alert('This share has already been declined. You can only re-accept it.');
-                } else if (errorMessage.includes('Cannot update blocked shares')) {
-                    alert('This share has been blocked and cannot be updated.');
-                } else {
-                    throw new Error(errorMessage);
-                }
-            }
-        } catch (error) {
-            console.error('[MessengerController] Error declining share:', error);
-            const errorMessage = error.message || 'Unknown error';
-            if (errorMessage.includes('Declined shares can only be re-accepted')) {
-                alert('This share has already been declined. You can only re-accept it.');
-            } else {
-                alert('Error declining share: ' + errorMessage);
-            }
-        }
     },
 
     /**
@@ -2190,274 +1618,6 @@ const MessengerController = {
         } catch (error) {
             console.error('[MessengerController] Error sending new message:', error);
             alert(`Error: ${error.message}`);
-        }
-    },
-
-    /**
-     * Handle share data button click
-     */
-    async handleShareDataClick() {
-        if (!this.currentConversationId) {
-            return;
-        }
-
-        const conversation = this.conversations.find(c => c.id === this.currentConversationId);
-        if (!conversation) {
-            return;
-        }
-
-        const otherUserEmail = conversation.other_user_email;
-        if (!otherUserEmail) {
-            return;
-        }
-
-        // Set email in modal (readonly since it's from the conversation)
-        const emailInput = document.getElementById('share-data-email');
-        if (emailInput) {
-            emailInput.value = otherUserEmail;
-        }
-
-        // Load months for selection
-        await this.loadShareDataMonths();
-
-        // Show modal
-        this.showShareDataModal();
-    },
-
-    /**
-     * Load months for share data modal
-     */
-    async loadShareDataMonths() {
-        try {
-            if (typeof window.DatabaseService === 'undefined') {
-                console.error('[MessengerController] DatabaseService not available');
-                return;
-            }
-
-            const allMonths = await window.DatabaseService.getAllMonths(false, false);
-            const monthKeys = Object.keys(allMonths).sort((a, b) => {
-                const [yearA, monthA] = a.split('-').map(Number);
-                const [yearB, monthB] = b.split('-').map(Number);
-                if (yearA !== yearB) return yearB - yearA;
-                return monthB - monthA;
-            });
-
-            const monthsContainer = document.getElementById('share-data-months-checkboxes');
-            if (!monthsContainer) {
-                console.warn('[MessengerController] share-data-months-checkboxes container not found');
-                return;
-            }
-
-            monthsContainer.innerHTML = '';
-
-            monthKeys.forEach(monthKey => {
-                const monthData = allMonths[monthKey];
-                if (monthData && !monthData.isShared) {
-                    const monthName = new Date(monthData.year, monthData.month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-                    const checkbox = document.createElement('label');
-                    checkbox.style.display = 'flex';
-                    checkbox.style.alignItems = 'center';
-                    checkbox.style.gap = 'var(--spacing-sm)';
-                    checkbox.innerHTML = `
-                        <input type="checkbox" class="share-month-checkbox" data-year="${monthData.year}" data-month="${monthData.month}">
-                        <span>${monthName}</span>
-                    `;
-                    monthsContainer.appendChild(checkbox);
-                }
-            });
-
-        } catch (error) {
-            console.error('[MessengerController] Error loading months for sharing:', error);
-        }
-    },
-
-    /**
-     * Get selected months from share data modal
-     */
-    getSelectedShareDataMonths() {
-        const checkboxes = document.querySelectorAll('.share-month-checkbox:checked');
-        return Array.from(checkboxes).map(checkbox => ({
-            type: 'single',
-            year: parseInt(checkbox.dataset.year, 10),
-            month: parseInt(checkbox.dataset.month, 10)
-        }));
-    },
-
-    /**
-     * Show share data modal
-     */
-    showShareDataModal() {
-        const modal = document.getElementById('share-data-modal');
-        if (modal) {
-            modal.style.display = 'flex';
-        }
-    },
-
-    /**
-     * Hide share data modal
-     */
-    hideShareDataModal() {
-        const modal = document.getElementById('share-data-modal');
-        if (modal) {
-            modal.style.display = 'none';
-        }
-    },
-
-    /**
-     * Handle save share data
-     */
-    async handleSaveShareData() {
-        if (!this.currentConversationId) {
-            alert('No conversation open');
-            return;
-        }
-
-        // Wait for payments module and SubscriptionGuard to be available
-        if (window.waitForPaymentsInit) {
-            try {
-                await window.waitForPaymentsInit();
-            } catch (error) {
-                console.warn('[MessengerController] Payments module init failed:', error);
-            }
-        }
-
-        // Wait for SubscriptionGuard to be available
-        if (!window.SubscriptionGuard) {
-            let waitCount = 0;
-            const maxWait = 50; // Wait up to 5 seconds
-            while (!window.SubscriptionGuard && waitCount < maxWait) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                waitCount++;
-            }
-            if (!window.SubscriptionGuard) {
-                alert('Subscription service not available. Please refresh the page.');
-                return;
-            }
-        }
-
-        const conversation = this.conversations.find(c => c.id === this.currentConversationId);
-        if (!conversation) {
-            return;
-        }
-
-        const emailInput = document.getElementById('share-data-email');
-        const accessLevelSelect = document.getElementById('share-data-access-level');
-        const shareAllDataCheckbox = document.getElementById('share-data-all-data');
-        const shareMonthsCheckbox = document.getElementById('share-data-months');
-        const sharePotsCheckbox = document.getElementById('share-data-pots');
-        const shareSettingsCheckbox = document.getElementById('share-data-settings');
-        const statusDiv = document.getElementById('share-data-form-status');
-
-        if (!emailInput || !accessLevelSelect) {
-            return;
-        }
-
-        const email = emailInput.value.trim();
-        const accessLevel = accessLevelSelect.value;
-        const shareAllData = shareAllDataCheckbox ? shareAllDataCheckbox.checked : false;
-        const shareMonths = shareMonthsCheckbox ? shareMonthsCheckbox.checked : false;
-        const sharePots = sharePotsCheckbox ? sharePotsCheckbox.checked : false;
-        const shareSettings = shareSettingsCheckbox ? shareSettingsCheckbox.checked : false;
-
-        if (!email) {
-            alert('Email is required');
-            return;
-        }
-
-        if (!shareMonths && !sharePots && !shareSettings && !shareAllData) {
-            alert('Please select at least one thing to share');
-            return;
-        }
-
-        let selectedMonths = [];
-
-        if (shareAllData) {
-            if (typeof window.DatabaseService === 'undefined') {
-                alert('DatabaseService not available');
-                return;
-            }
-            
-            try {
-                const allMonths = await window.DatabaseService.getAllMonths(false, false);
-                const monthKeys = Object.keys(allMonths);
-                selectedMonths = monthKeys.map(monthKey => {
-                    const monthData = allMonths[monthKey];
-                    if (monthData && !monthData.isShared) {
-                        return { type: 'single', year: monthData.year, month: monthData.month };
-                    }
-                    return null;
-                }).filter(m => m !== null);
-            } catch (error) {
-                console.error('[MessengerController] Error loading all months:', error);
-                alert('Error loading your months. Please try again.');
-                return;
-            }
-        } else if (shareMonths) {
-            selectedMonths = this.getSelectedShareDataMonths();
-            if (selectedMonths.length === 0) {
-                alert('Please select at least one month');
-                return;
-            }
-        }
-
-        if (statusDiv) {
-            statusDiv.innerHTML = '<p>Saving share...</p>';
-        }
-
-        try {
-            if (typeof window.DatabaseService === 'undefined') {
-                throw new Error('DatabaseService not available');
-            }
-
-            const result = await window.DatabaseService.createDataShare(
-                email,
-                accessLevel,
-                selectedMonths,
-                sharePots,
-                shareSettings,
-                shareAllData
-            );
-
-            if (result.success && result.share) {
-                // Link the share to the conversation
-                const tableName = window.DatabaseService._getTableName('dataShares');
-                const updateResult = await window.DatabaseService.queryUpdate(
-                    tableName,
-                    result.share.id,
-                    { conversation_id: this.currentConversationId }
-                );
-
-                if (updateResult.error) {
-                    console.warn('[MessengerController] Failed to link share to conversation:', updateResult.error);
-                }
-
-                if (statusDiv) {
-                    statusDiv.innerHTML = '<p style="color: var(--success-color);">Share created successfully!</p>';
-                }
-
-                // Close modal after a short delay
-                setTimeout(() => {
-                    this.hideShareDataModal();
-                    // Reload messages to show the share request message
-                    if (this.currentConversationId) {
-                        this.openConversation(this.currentConversationId);
-                    }
-                }, 1500);
-            } else {
-                const errorMessage = result.error || 'Failed to create share';
-                if (statusDiv) {
-                    statusDiv.innerHTML = `<p style="color: var(--error-color);">Error: ${errorMessage}</p>`;
-                } else {
-                    alert(`Error: ${errorMessage}`);
-                }
-            }
-        } catch (error) {
-            console.error('[MessengerController] Error saving share:', error);
-            if (statusDiv) {
-                statusDiv.innerHTML = `<p style="color: var(--error-color);">Error: ${error.message}</p>`;
-            } else {
-                alert(`Error: ${error.message}`);
-            }
         }
     }
 };

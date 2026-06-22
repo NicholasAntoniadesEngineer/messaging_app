@@ -96,71 +96,6 @@
         </div>
     </div>
 
-    <!-- Share Data Modal -->
-    <div id="share-data-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center;">
-        <div class="modal-content" style="background: var(--color-bg-card); padding: var(--space-6); border-radius: var(--radius-xl); max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); border-left: 3px solid var(--color-action);">
-            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-5); padding-bottom: var(--space-4); border-bottom: 1px solid var(--color-border-light);">
-                <h3 style="margin: 0; display: flex; align-items: center; gap: var(--space-3); color: var(--color-text-primary); font-size: var(--text-lg);"><i class="fas fa-share-alt" style="color: var(--color-action);"></i> Share Data</h3>
-                <button id="close-share-data-modal" class="btn btn-secondary" style="padding: var(--space-2); min-width: auto; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; line-height: 1; border-radius: var(--radius-full);">×</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group" style="margin-bottom: var(--space-4);">
-                    <label for="share-data-email" class="form-label" style="display: block; margin-bottom: var(--space-2); font-weight: 500; font-size: var(--text-sm); color: var(--color-text-secondary);">User Email</label>
-                    <input type="email" id="share-data-email" class="form-input" placeholder="user@example.com" autocomplete="email" required readonly style="background: var(--color-bg-surface); cursor: not-allowed;">
-                </div>
-
-                <div class="form-group" style="margin-bottom: var(--space-4);">
-                    <label for="share-data-access-level" class="form-label" style="display: block; margin-bottom: var(--space-2); font-weight: 500; font-size: var(--text-sm); color: var(--color-text-secondary);">Access Level</label>
-                    <select id="share-data-access-level" class="form-select">
-                        <option value="read">Read Only</option>
-                        <option value="read_write">Read/Write</option>
-                        <option value="read_write_delete">Read/Write/Delete</option>
-                    </select>
-                </div>
-
-                <div class="form-group" style="margin-bottom: var(--space-5); padding: var(--space-4); background: var(--color-bg-surface); border-radius: var(--radius-lg); border-left: 2px solid var(--color-action);">
-                    <label style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer;">
-                        <input type="checkbox" id="share-data-all-data" style="cursor: pointer;">
-                        <span style="font-weight: 500; color: var(--color-text-primary);">Share All Data</span>
-                    </label>
-                </div>
-
-                <div class="form-group" style="margin-bottom: var(--space-4);">
-                    <label class="form-label" style="display: block; margin-bottom: var(--space-3); font-weight: 500; font-size: var(--text-sm); color: var(--color-text-secondary);">Share Options</label>
-                    <div style="display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); background: var(--color-bg-surface); border-radius: var(--radius-lg);">
-                        <label style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer;">
-                            <input type="checkbox" id="share-data-months" checked style="cursor: pointer;">
-                            <span>Months</span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer;">
-                            <input type="checkbox" id="share-data-pots" style="cursor: pointer;">
-                            <span>Pots</span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer;">
-                            <input type="checkbox" id="share-data-settings" style="cursor: pointer;">
-                            <span>Settings</span>
-                        </label>
-                    </div>
-                </div>
-
-                <div id="share-data-months-container" style="margin-bottom: var(--space-4);">
-                    <label class="form-label" style="display: block; margin-bottom: var(--space-3); font-weight: 500; font-size: var(--text-sm); color: var(--color-text-secondary);">Select Months</label>
-                    <div id="share-data-months-checkboxes" style="display: flex; flex-direction: column; gap: var(--space-2); max-height: 200px; overflow-y: auto; padding: var(--space-4); background: var(--color-bg-surface); border-radius: var(--radius-lg); border: 1px solid var(--color-border-light);">
-                        <!-- Month checkboxes will be added here -->
-                    </div>
-                </div>
-
-                <div id="share-data-form-status" style="margin-top: var(--space-4);"></div>
-            </div>
-            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--color-border-light);">
-                <button id="cancel-share-data-button" class="btn btn-secondary">Cancel</button>
-                <button id="save-share-data-button" class="btn btn-action"><i class="fas fa-share-alt"></i> Share Data</button>
-            </div>
-        </div>
-    </div>
-
-
-
     <!-- Scripts -->
     <!-- Global Logging Configuration - MUST load first -->
     <script src="../../shared/config/loggingConfig.js"></script>
@@ -216,23 +151,7 @@
     <!-- Initialize Database Module -->
     <script src="../../database/initDatabase.js"></script>
     
-    <!-- Payments Module Configuration -->
-    <script src="../../payments/config/paymentsConfigBase.js"></script>
-    <script src="../../payments/config/moneyTrackerConfig.js"></script>
-    <script src="../../payments/utils/configHelper.js"></script>
-    <script src="../../payments/paymentsModule.js"></script>
-    
-    <!-- Payments Services -->
-    <script src="../../payments/services/stripeService.js"></script>
-    <script src="../../payments/services/paymentService.js"></script>
-    <script src="../../payments/services/subscriptionService.js"></script>
-    <script src="../../payments/utils/subscriptionChecker.js"></script>
-    
-    <!-- Initialize Payments Module -->
-    <script src="../../payments/initPayments.js"></script>
-    <script src="../../payments/utils/waitForPaymentsInit.js"></script>
-    <script src="../../shared/utils/subscriptionGuard.js"></script>
-    <script src="../../shared/utils/permissionService.js"></script>
+    <!-- Payments, subscription gating and permission tiers removed: Secure Messenger is standalone and ungated -->
     <script src="../../shared/utils/authGuard.js"></script>
     <script src="../../shared/utils/networkUtils.js"></script>
     <script src="../../shared/utils/offlineHandler.js"></script>

@@ -1,8 +1,8 @@
 {
-  "name": "money-tracker",
-  "version": "2.0.0",
+  "name": "secure-messenger",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Personal finance and budgeting application with E2E encryption",
+  "description": "Standalone end-to-end encrypted messaging web app (X25519 + XSalsa20-Poly1305) on Supabase",
   "scripts": {
     "dev": "vite",
     "build:css": "npx @tailwindcss/cli -i ./shared/styles/main.css -o ./shared/styles/main-compiled.css --minify",
