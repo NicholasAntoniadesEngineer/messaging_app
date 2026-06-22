@@ -160,28 +160,30 @@ const StripeService = {
                     
                     console.log('[StripeService] Step 4: Parsing response...');
                     const result = await response.json();
+                    // The edge function returns snake_case `session_id` plus the hosted Checkout `url`.
+                    // Accept both naming styles and forward the URL so the caller can redirect directly.
+                    const sessionId = result.sessionId || result.session_id || (result.session && result.session.id) || null;
+                    const checkoutUrl = result.url || result.checkoutUrl || null;
                     console.log('[StripeService] Response data:', {
-                        hasSessionId: !!result.sessionId,
-                        sessionId: result.sessionId || 'none',
+                        hasSessionId: !!sessionId,
+                        hasUrl: !!checkoutUrl,
                         hasCustomerId: !!result.customerId,
-                        customerId: result.customerId || 'none',
                         error: result.error || 'none'
                     });
-                    
-                    if (result.sessionId) {
+
+                    if (sessionId || checkoutUrl) {
                         const totalElapsed = Date.now() - startTime;
                         console.log('[StripeService] ========== createCheckoutSession() SUCCESS ==========');
-                        console.log('[StripeService] Session ID:', result.sessionId);
-                        console.log('[StripeService] Customer ID:', result.customerId || 'none');
                         console.log('[StripeService] Total time:', `${totalElapsed}ms`);
                         return {
                             success: true,
-                            sessionId: result.sessionId,
-                            customerId: result.customerId || null,  // Include customer ID if returned
+                            sessionId: sessionId,
+                            url: checkoutUrl,            // forward hosted Checkout URL (preferred redirect)
+                            customerId: result.customerId || null,
                             error: null
                         };
                     } else {
-                        console.error('[StripeService] ❌ No session ID in response:', result);
+                        console.error('[StripeService] ❌ No session id/url in response:', result);
                         throw new Error(result.error || 'No session ID returned from backend');
                     }
                 } catch (fetchError) {
