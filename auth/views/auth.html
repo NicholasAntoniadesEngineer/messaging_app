@@ -125,6 +125,12 @@
                 <button type="button" class="btn btn-primary w-full mt-4" id="restore-with-recovery-btn" disabled>
                     Restore Keys
                 </button>
+
+                <div class="text-center mt-4" style="border-top: 1px solid var(--color-border-light); padding-top: var(--space-4);">
+                    <p class="text-sm text-slate-500 mb-2">Lost your recovery key?</p>
+                    <button type="button" class="btn-text btn-text-danger" id="reset-encryption-btn">Reset encryption &amp; start fresh</button>
+                    <p class="text-sm text-slate-500 mt-1" style="font-size: 0.75rem;">No one — not even an administrator — can recover your old messages without your key. This keeps your account and creates new keys; existing encrypted messages will become permanently unreadable.</p>
+                </div>
             </div>
 
             <!-- Sign Up Form -->
@@ -1025,6 +1031,71 @@
                 showError('recovery-restore-error', 'Failed to restore keys. Please check your recovery key and try again.');
                 btn.disabled = false;
                 btn.textContent = 'Restore Keys';
+            }
+        });
+
+        // --- Reset Encryption (lost recovery key) ---
+        // Highest-integrity, NO-backdoor escape hatch. There is no admin recovery (that would
+        // defeat E2E). When a user has lost their recovery key after a password reset, this
+        // re-keys with a fresh identity: the account is kept, server identity + backup rows are
+        // overwritten (upsert), and old messages encrypted to the previous identity become
+        // permanently unreadable. The user is shown a NEW recovery key to save.
+        document.getElementById('reset-encryption-btn').addEventListener('click', async () => {
+            clearErrors();
+            const confirmed = window.confirm(
+                'Reset encryption?\n\n' +
+                'This creates brand-new encryption keys for your account. You KEEP your account, but every ' +
+                'existing encrypted message becomes permanently unreadable — no one, including an administrator, ' +
+                'can recover them without your recovery key.\n\n' +
+                'You will be shown a NEW recovery key to save. Continue?'
+            );
+            if (!confirmed) return;
+
+            const userId = document.getElementById('recovery-key-restore-section').dataset.userId;
+            const btn = document.getElementById('reset-encryption-btn');
+            btn.disabled = true;
+
+            try {
+                const password = window.PasswordManager?.retrieve();
+                if (!password) {
+                    showError('recovery-restore-error', 'Session expired — please sign in again, then reset.');
+                    await window.AuthService.signOut();
+                    return;
+                }
+
+                showEncryptionUI();
+                await initCryptoServices();
+                await window.KeyManagementService.initialize(userId, MoneyTrackerEncryptionConfig);
+
+                // Wipe local key state so regeneration is clean (preserves the at-rest wrap key).
+                if (window.KeyStorageService?.clearAll) {
+                    await window.KeyStorageService.clearAll();
+                }
+
+                // Fresh identity — upserts overwrite the old (now-undecryptable) server identity.
+                const keyResult = await window.KeyManagementService.generateAndStoreIdentityKeys(userId);
+                if (!keyResult || !keyResult.success) {
+                    throw new Error('Failed to generate new encryption keys');
+                }
+
+                const recoveryKeyB64 = window.PasswordCryptoService.generateRecoveryKey();
+                const recoveryKeyFormatted = window.PasswordCryptoService.formatRecoveryKey(recoveryKeyB64);
+
+                await showRecoveryKeyModal(recoveryKeyFormatted, async (finalRecoveryKey) => {
+                    const recoveryKeyToUse = finalRecoveryKey === recoveryKeyFormatted
+                        ? recoveryKeyB64
+                        : window.PasswordCryptoService.parseRecoveryKey(finalRecoveryKey);
+
+                    // Overwrites the stale backup with one keyed to the NEW identity.
+                    await window.KeyManagementService.createDualBackup(password, recoveryKeyToUse);
+                    window.PasswordManager?.clear();
+                    document.getElementById('recovery-key-modal').style.display = 'none';
+                    showEncryptionSuccess();
+                });
+            } catch (error) {
+                console.error('[Auth] Reset encryption failed:', error);
+                showError('recovery-restore-error', 'Reset failed. Please try again.');
+                btn.disabled = false;
             }
         });
 
