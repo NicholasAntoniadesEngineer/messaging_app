@@ -8,10 +8,10 @@
          'unsafe-inline' for scripts is a known gap pending removal of inline blocks. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>Settings - Secure Messenger</title>
-    <link rel="stylesheet" href="../../shared/vendor/font-awesome/css/all.min.css">
-    <link rel="stylesheet" href="../../shared/styles/main-compiled.css">
-    <link rel="stylesheet" href="../../shared/styles/dark-theme.css?v=2">
-    <script src="../../shared/vendor/supabase/supabase.min.js"></script>
+    <link rel="stylesheet" href="../../lib/auth_db/shared/vendor/font-awesome/css/all.min.css">
+    <link rel="stylesheet" href="../../lib/auth_db/shared/styles/main-compiled.css">
+    <link rel="stylesheet" href="../../lib/auth_db/shared/styles/dark-theme.css?v=2">
+    <script src="../../lib/auth_db/shared/vendor/supabase/supabase.min.js"></script>
     <script>
         // Apply the saved font scale before first paint (messaging-specific key).
         (function() {
@@ -126,25 +126,25 @@
 
     <!-- Scripts -->
     <!-- Global Logging Configuration - MUST load first -->
-    <script src="../../shared/config/loggingConfig.js"></script>
+    <script src="../../lib/auth_db/shared/config/loggingConfig.js"></script>
 
-    <script src="../../database/config/supabaseConfig.js"></script>
-    <script src="../../shared/services/authService.js"></script>
-    <script src="../../database/config/databaseConfigBase.js"></script>
-    <script src="../../database/config/moneyTrackerDatabaseConfig.js"></script>
-    <script src="../../database/utils/databaseConfigHelper.js"></script>
-    <script src="../../database/databaseModule.js"></script>
+    <script src="../../lib/auth_db/database/config/supabaseConfig.js"></script>
+    <script src="../../lib/auth_db/shared/services/authService.js"></script>
+    <script src="../../lib/auth_db/database/config/databaseConfigBase.js"></script>
+    <script src="../../lib/auth_db/database/config/moneyTrackerDatabaseConfig.js"></script>
+    <script src="../../lib/auth_db/database/utils/databaseConfigHelper.js"></script>
+    <script src="../../lib/auth_db/database/databaseModule.js"></script>
 
     <!-- Core Utilities -->
-    <script src="../../shared/config/moduleRegistry.js"></script>
-    <script src="../../shared/config/constants.js"></script>
-    <script src="../../shared/utils/logger.js"></script>
-    <script src="../../shared/utils/errorHandler.js"></script>
-    <script src="../../shared/utils/validators.js"></script>
-    <script src="../../shared/utils/passwordManager.js"></script>
+    <script src="../../lib/auth_db/shared/config/moduleRegistry.js"></script>
+    <script src="../../lib/auth_db/shared/config/constants.js"></script>
+    <script src="../../lib/auth_db/shared/utils/logger.js"></script>
+    <script src="../../lib/auth_db/shared/utils/errorHandler.js"></script>
+    <script src="../../lib/auth_db/shared/utils/validators.js"></script>
+    <script src="../../lib/auth_db/shared/utils/passwordManager.js"></script>
 
     <!-- Database Service -->
-    <script src="../../database/services/databaseService.js"></script>
+    <script src="../../lib/auth_db/database/services/databaseService.js"></script>
 
     <!-- E2E Encryption Module (for the Security fingerprint section) -->
     <script src="../../encryption/config/encryptionConfigBase.js"></script>
@@ -164,15 +164,15 @@
     <script src="../../encryption/initEncryption.js"></script>
 
     <!-- Initialize Database Module -->
-    <script src="../../database/initDatabase.js"></script>
+    <script src="../../lib/auth_db/database/initDatabase.js"></script>
 
     <!-- Guards / utilities -->
-    <script src="../../shared/utils/authGuard.js"></script>
-    <script src="../../shared/utils/networkUtils.js"></script>
-    <script src="../../shared/utils/offlineHandler.js"></script>
+    <script src="../../lib/auth_db/shared/utils/authGuard.js"></script>
+    <script src="../../lib/auth_db/shared/utils/networkUtils.js"></script>
+    <script src="../../lib/auth_db/shared/utils/offlineHandler.js"></script>
 
     <!-- Header Component -->
-    <script src="../../shared/header/header.js"></script>
+    <script src="../../lib/auth_db/shared/header/header.js"></script>
 
     <!-- Settings Controller -->
     <script src="../controllers/settingsController.js"></script>

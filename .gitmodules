@@ -1,0 +1,6 @@
+[submodule "lib/auth_db"]
+	path = lib/auth_db
+	url = https://github.com/NicholasAntoniadesEngineer/auth_db
+[submodule "lib/payments_app"]
+	path = lib/payments_app
+	url = https://github.com/NicholasAntoniadesEngineer/payments_app

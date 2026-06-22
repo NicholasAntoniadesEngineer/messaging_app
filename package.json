@@ -5,9 +5,9 @@
   "description": "Standalone end-to-end encrypted messaging web app (X25519 + XSalsa20-Poly1305) on Supabase",
   "scripts": {
     "dev": "vite",
-    "build:css": "npx @tailwindcss/cli -i ./shared/styles/main.css -o ./shared/styles/main-compiled.css --minify",
+    "build:css": "npx @tailwindcss/cli -i ./lib/auth_db/shared/styles/main.css -o ./lib/auth_db/shared/styles/main-compiled.css --minify",
     "build": "npm run build:css && vite build",
-    "watch:css": "npx @tailwindcss/cli -i ./shared/styles/main.css -o ./shared/styles/main-compiled.css --watch"
+    "watch:css": "npx @tailwindcss/cli -i ./lib/auth_db/shared/styles/main.css -o ./lib/auth_db/shared/styles/main-compiled.css --watch"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.0.0",

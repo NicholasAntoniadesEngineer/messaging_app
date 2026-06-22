@@ -6,10 +6,10 @@
     <!-- Content-Security-Policy (SM-19) -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>Secure Messenger - Sign In</title>
-    <link rel="stylesheet" href="../../shared/vendor/font-awesome/css/all.min.css">
-    <link rel="stylesheet" href="../../shared/styles/main-compiled.css">
-    <link rel="stylesheet" href="../../shared/styles/dark-theme.css?v=2">
-    <script src="../../shared/vendor/supabase/supabase.min.js"></script>
+    <link rel="stylesheet" href="../../lib/auth_db/shared/vendor/font-awesome/css/all.min.css">
+    <link rel="stylesheet" href="../../lib/auth_db/shared/styles/main-compiled.css">
+    <link rel="stylesheet" href="../../lib/auth_db/shared/styles/dark-theme.css?v=2">
+    <script src="../../lib/auth_db/shared/vendor/supabase/supabase.min.js"></script>
     <script>
         (function() {
             var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
@@ -232,52 +232,52 @@
     </main>
 
     <!-- Global Logging Configuration -->
-    <script src="../../shared/config/loggingConfig.js"></script>
-    <script src="../../database/config/supabaseConfig.js"></script>
-    <script src="../../shared/services/authService.js"></script>
+    <script src="../../lib/auth_db/shared/config/loggingConfig.js"></script>
+    <script src="../../lib/auth_db/database/config/supabaseConfig.js"></script>
+    <script src="../../lib/auth_db/shared/services/authService.js"></script>
 
     <!-- Database Module -->
-    <script src="../../database/config/databaseConfigBase.js"></script>
-    <script src="../../database/config/moneyTrackerDatabaseConfig.js"></script>
-    <script src="../../database/utils/databaseConfigHelper.js"></script>
-    <script src="../../database/databaseModule.js"></script>
+    <script src="../../lib/auth_db/database/config/databaseConfigBase.js"></script>
+    <script src="../../lib/auth_db/database/config/moneyTrackerDatabaseConfig.js"></script>
+    <script src="../../lib/auth_db/database/utils/databaseConfigHelper.js"></script>
+    <script src="../../lib/auth_db/database/databaseModule.js"></script>
 
     <!-- Core Utilities -->
-    <script src="../../shared/config/moduleRegistry.js"></script>
-    <script src="../../shared/config/constants.js"></script>
-    <script src="../../shared/utils/logger.js"></script>
-    <script src="../../shared/utils/errorHandler.js"></script>
-    <script src="../../shared/utils/validators.js"></script>
+    <script src="../../lib/auth_db/shared/config/moduleRegistry.js"></script>
+    <script src="../../lib/auth_db/shared/config/constants.js"></script>
+    <script src="../../lib/auth_db/shared/utils/logger.js"></script>
+    <script src="../../lib/auth_db/shared/utils/errorHandler.js"></script>
+    <script src="../../lib/auth_db/shared/utils/validators.js"></script>
 
     <!-- Database Services -->
-    <script src="../../database/services/databaseService.js"></script>
+    <script src="../../lib/auth_db/database/services/databaseService.js"></script>
     <script src="../../database/services/dataSharingService.js"></script>
     <script src="../../database/services/fieldLockingService.js"></script>
 
     <!-- Notification Services -->
-    <script src="../../database/services/notificationTypeRegistry.js"></script>
-    <script src="../../database/services/notificationService.js"></script>
-    <script src="../../database/services/notificationPreferenceService.js"></script>
-    <script src="../../database/services/notificationChannelService.js"></script>
-    <script src="../../database/services/notificationProcessor.js"></script>
+    <script src="../../lib/auth_db/database/services/notificationTypeRegistry.js"></script>
+    <script src="../../lib/auth_db/database/services/notificationService.js"></script>
+    <script src="../../lib/auth_db/database/services/notificationPreferenceService.js"></script>
+    <script src="../../lib/auth_db/database/services/notificationChannelService.js"></script>
+    <script src="../../lib/auth_db/database/services/notificationProcessor.js"></script>
 
     <!-- Initialize Database Module -->
-    <script src="../../database/initDatabase.js"></script>
+    <script src="../../lib/auth_db/database/initDatabase.js"></script>
 
     <!-- Messaging Service -->
     <script src="../../messaging/services/messagingService.js"></script>
 
     <!-- Payments / Subscription Module -->
-    <script src="../../payments/config/paymentsConfigBase.js"></script>
-    <script src="../../payments/config/moneyTrackerConfig.js"></script>
-    <script src="../../payments/utils/configHelper.js"></script>
-    <script src="../../payments/paymentsModule.js"></script>
-    <script src="../../payments/services/stripeService.js"></script>
-    <script src="../../payments/services/paymentService.js"></script>
-    <script src="../../payments/services/subscriptionService.js"></script>
-    <script src="../../payments/utils/subscriptionChecker.js"></script>
-    <script src="../../payments/initPayments.js"></script>
-    <script src="../../payments/utils/waitForPaymentsInit.js"></script>
+    <script src="../../lib/payments_app/payments/config/paymentsConfigBase.js"></script>
+    <script src="../../lib/payments_app/payments/config/moneyTrackerConfig.js"></script>
+    <script src="../../lib/payments_app/payments/utils/configHelper.js"></script>
+    <script src="../../lib/payments_app/payments/paymentsModule.js"></script>
+    <script src="../../lib/payments_app/payments/services/stripeService.js"></script>
+    <script src="../../lib/payments_app/payments/services/paymentService.js"></script>
+    <script src="../../lib/payments_app/payments/services/subscriptionService.js"></script>
+    <script src="../../lib/payments_app/payments/utils/subscriptionChecker.js"></script>
+    <script src="../../lib/payments_app/payments/initPayments.js"></script>
+    <script src="../../lib/payments_app/payments/utils/waitForPaymentsInit.js"></script>
 
     <!-- E2E Encryption Module -->
     <script src="../../encryption/config/encryptionConfigBase.js"></script>
@@ -298,10 +298,10 @@
 
     <!-- Encryption & Device Management -->
     <script src="../../messaging/services/devicePairingService.js"></script>
-    <script src="../../shared/utils/pairing-guard.js"></script>
-    <script src="../../shared/utils/passwordManager.js"></script>
-    <script src="../../shared/utils/authGuard.js"></script>
-    <script src="../../shared/header/header.js"></script>
+    <script src="../../lib/auth_db/shared/utils/pairing-guard.js"></script>
+    <script src="../../lib/auth_db/shared/utils/passwordManager.js"></script>
+    <script src="../../lib/auth_db/shared/utils/authGuard.js"></script>
+    <script src="../../lib/auth_db/shared/header/header.js"></script>
 
     <script>
         console.log('[Auth] Script initialization starting...');
