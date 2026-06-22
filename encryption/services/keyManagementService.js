@@ -66,7 +66,7 @@ const KeyManagementService = {
 
         this.currentUserId = userId;
 
-        console.log(`[KeyManagementService] Initializing for user ${userId.slice(0, 8)}...`);
+        console.log('[KeyManagementService] Initializing for user');
 
         try {
             await CryptoPrimitivesService.initialize(config);
@@ -184,7 +184,7 @@ const KeyManagementService = {
         // Store public key in database - CRITICAL for E2E encryption
         if (this._database) {
             const identityTable = this._config?.tables?.identityKeys || 'identity_keys';
-            console.log(`[KeyManagementService] Storing public key in ${identityTable} for user ${userId.slice(0, 8)}...`);
+            console.log(`[KeyManagementService] Storing public key in ${identityTable}`);
 
             try {
                 const result = await this._database.queryUpsert(identityTable, {
@@ -353,7 +353,7 @@ const KeyManagementService = {
         // Store public key in database - CRITICAL for E2E encryption
         if (this._database) {
             const identityTable = this._config?.tables?.identityKeys || 'identity_keys';
-            console.log(`[KeyManagementService] Storing public key in ${identityTable} for user ${this.currentUserId.slice(0, 8)}...`);
+            console.log(`[KeyManagementService] Storing public key in ${identityTable}`);
 
             try {
                 const result = await this._database.queryUpsert(identityTable, {
@@ -737,10 +737,10 @@ const KeyManagementService = {
 
         console.log(`[KeyManagementService] establishSession: Creating NEW session for conv=${conversationId}`);
 
-        // Get other user's current public key
-        const theirPublicKeyB64 = await HistoricalKeysService.getCurrentKey(otherUserId);
+        // Get other user's current public key (SM-01: through the TOFU pin chokepoint)
+        const theirPublicKeyB64 = await this._getPinnedPeerKey(otherUserId);
         if (!theirPublicKeyB64) {
-            throw new Error(`Other user (${otherUserId.substring(0, 8)}...) has no public key - they may not have set up encryption yet`);
+            throw new Error('Other user has no public key - they may not have set up encryption yet');
         }
 
         // Get our keys
@@ -845,6 +845,21 @@ const KeyManagementService = {
     },
 
     /**
+     * Build a typed DecryptionError when the error class is available, otherwise
+     * fall back to a plain Error so the failure still propagates loudly.
+     * @private
+     * @param {string} reason
+     * @param {string} context
+     * @returns {Error}
+     */
+    _decryptionError(reason, context) {
+        const Cls = (typeof DecryptionError !== 'undefined')
+            ? DecryptionError
+            : (typeof window !== 'undefined' && window.DecryptionError) || null;
+        return Cls ? new Cls(reason, context) : new Error(`${reason} while decrypting ${context}`);
+    },
+
+    /**
      * Decrypt a message
      * @param {number|string} conversationId - Conversation ID
      * @param {Object} encryptedData - { ciphertext, nonce, counter, epoch }
@@ -881,27 +896,123 @@ const KeyManagementService = {
             throw new Error('Cannot decrypt - no session key available');
         }
 
-        // Derive message key and decrypt
+        // Derive message key and attempt to decrypt
         const messageKey = await KeyDerivationService.deriveMessageKey(session.sessionKey, epoch, counter);
 
+        let plaintext;
         try {
-            return CryptoPrimitivesService.decrypt(ciphertext, nonce, messageKey);
-        } catch (decryptError) {
-            // If cached session failed, try re-deriving from ECDH
+            plaintext = CryptoPrimitivesService.decrypt(ciphertext, nonce, messageKey);
+        } catch (authFailure) {
+            // SM-24: do NOT silently rebuild the session and swallow auth failures.
+            // The single allowed retry is a genuine stale-cache repair: re-derive
+            // ONCE from history (which routes through _getPinnedPeerKey, so a server
+            // key swap has already been warned about) and retry ONLY if the freshly
+            // derived session key actually differs from the cached one. Otherwise the
+            // failure is real tampering/corruption and we throw a typed error.
             if (usedCachedSession) {
-                console.log('[KeyManagementService] Cached session stale, re-deriving...');
-                try {
-                    await KeyStorageService.deleteSessionKeysForConversation(conversationId);
-                } catch (e) { /* ignore */ }
-
                 const freshSession = await this._deriveSessionFromHistory(conversationId, otherUserId);
-                if (freshSession) {
-                    const freshMessageKey = await KeyDerivationService.deriveMessageKey(freshSession.sessionKey, epoch, counter);
-                    return CryptoPrimitivesService.decrypt(ciphertext, nonce, freshMessageKey);
+
+                const sessionKeyChanged = freshSession &&
+                    !CryptoPrimitivesService.constantTimeEqual(freshSession.sessionKey, session.sessionKey);
+
+                if (sessionKeyChanged) {
+                    const retryKey = await KeyDerivationService.deriveMessageKey(freshSession.sessionKey, epoch, counter);
+                    try {
+                        plaintext = CryptoPrimitivesService.decrypt(ciphertext, nonce, retryKey);
+                        // Adopt the repaired session for subsequent messages.
+                        session = freshSession;
+                    } catch (retryFailure) {
+                        throw this._decryptionError('authentication failed', 'message');
+                    }
+                } else {
+                    // No different session to try - real tamper/auth failure.
+                    // Note: we do NOT delete the cached session here; deleting it was
+                    // pure masking and forced a needless re-derive on every load.
+                    throw this._decryptionError('authentication failed', 'message');
                 }
+            } else {
+                throw this._decryptionError('authentication failed', 'message');
             }
-            throw decryptError;
         }
+
+        // SM-10: replay high-water mark — ADVANCE-ONLY here (must not reject).
+        // decryptMessage is invoked for FULL HISTORY re-decryption on every conversation
+        // open (newest-first, in parallel via Promise.all). Rejecting counter < last would
+        // therefore reject legitimate older history after the newest message advanced the
+        // mark — breaking the round trip. So here we only track the per-sender high-water
+        // mark (best-effort, never blocking). Strict at-most-once rejection of a freshly
+        // REPLAYED message must be enforced on the realtime single-message arrival path,
+        // not in batch history decryption (tracked as a follow-up).
+        if (senderId !== this.currentUserId) {
+            try {
+                const last = await KeyStorageService.getLastCounter(conversationId, epoch, senderId);
+                if (counter > last) {
+                    await KeyStorageService.setLastCounter(conversationId, epoch, senderId, counter);
+                }
+            } catch (e) {
+                // Counter bookkeeping must never block a successful decryption.
+            }
+        }
+
+        return plaintext;
+    },
+
+    /**
+     * SM-01: Fetch a peer's current public key through a TOFU (trust-on-first-use)
+     * pin. This is the single chokepoint both ECDH derivation sites use instead of
+     * calling HistoricalKeysService.getCurrentKey directly.
+     *
+     * Policy (non-blocking, smooth-UX):
+     *  - First contact: pin the fetched key, return it.
+     *  - Unchanged key (common case): return it verbatim - byte-identical to today.
+     *  - Changed key: dispatch a one-shot `peerKeyChanged` event (warn, do NOT
+     *    block), then adopt + re-pin the new key so the conversation keeps working.
+     *    We only warn once per distinct new fingerprint.
+     *
+     * @private
+     * @param {string} otherUserId - Peer user ID
+     * @returns {Promise<string|null>} Base64 public key or null
+     */
+    async _getPinnedPeerKey(otherUserId) {
+        const fetched = await HistoricalKeysService.getCurrentKey(otherUserId);
+        if (!fetched) {
+            return null;
+        }
+
+        const fp = CryptoPrimitivesService.getKeyFingerprint(
+            CryptoPrimitivesService.deserializeKey(fetched)
+        );
+        const pinned = await KeyStorageService.getPinnedKey(otherUserId);
+
+        if (!pinned) {
+            // First contact - trust on first use.
+            await KeyStorageService.pinKey(otherUserId, fetched, fp);
+            return fetched;
+        }
+
+        if (pinned.publicKey === fetched) {
+            // Unchanged - normal case.
+            return fetched;
+        }
+
+        // Key changed: WARN (one-shot per distinct new key), do not block.
+        if (pinned.lastWarnedFingerprint !== fp) {
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('peerKeyChanged', {
+                    detail: {
+                        userId: otherUserId,
+                        oldFingerprint: pinned.fingerprint,
+                        newFingerprint: fp
+                    }
+                }));
+            }
+            await KeyStorageService.updatePinnedWarn(otherUserId, fp);
+        }
+
+        // Clean-break / smooth-UX: adopt + re-pin the new key (pinKey preserves
+        // lastWarnedFingerprint), so we keep working and only warn once.
+        await KeyStorageService.pinKey(otherUserId, fetched, fp);
+        return fetched;
     },
 
     /**
@@ -965,7 +1076,9 @@ const KeyManagementService = {
             throw new Error('No local identity keys');
         }
 
-        const theirPublicKeyB64 = await HistoricalKeysService.getCurrentKey(otherUserId);
+        // Route through the TOFU chokepoint so the safety number reflects the PINNED
+        // key (what we actually encrypt to), not an un-pinned fresh server fetch.
+        const theirPublicKeyB64 = await this._getPinnedPeerKey(otherUserId);
         if (!theirPublicKeyB64) {
             throw new Error('Other user has no public key');
         }
@@ -1140,7 +1253,7 @@ const KeyManagementService = {
                 try {
                     await HistoricalKeysService.syncToLocal(partnerId);
                 } catch (error) {
-                    console.warn(`[KeyManagementService] Failed to sync keys for partner ${partnerId.slice(0, 8)}...`, error.message);
+                    console.warn('[KeyManagementService] Failed to sync keys for a partner:', error.message);
                 }
             }
 
@@ -1158,11 +1271,12 @@ const KeyManagementService = {
      * @returns {Promise<Object|null>} { sessionKey, epoch, counter } or null
      */
     async _deriveSessionFromHistory(conversationId, otherUserId) {
-        console.log(`[KeyManagementService] Deriving session: conv=${conversationId}, otherUser=${otherUserId.substring(0, 8)}...`);
+        console.log(`[KeyManagementService] Deriving session for conv=${conversationId}`);
 
-        const theirPublicKeyB64 = await HistoricalKeysService.getCurrentKey(otherUserId);
+        // SM-01: resolve the peer key through the TOFU pin chokepoint.
+        const theirPublicKeyB64 = await this._getPinnedPeerKey(otherUserId);
         if (!theirPublicKeyB64) {
-            console.error(`[KeyManagementService] No public key for user ${otherUserId.substring(0, 8)}`);
+            console.error('[KeyManagementService] No public key for peer');
             return null;
         }
 

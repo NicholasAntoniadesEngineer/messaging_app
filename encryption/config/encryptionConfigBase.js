@@ -84,11 +84,14 @@ const EncryptionConfigBase = {
      */
     indexedDB: {
         name: 'MoneyTrackerEncryption',
-        version: 1,
+        version: 2,
         stores: {
             identityKeys: 'identity_keys',
             sessionKeys: 'session_keys',
-            historicalKeys: 'historical_keys'
+            historicalKeys: 'historical_keys',
+            wrapKeys: 'wrap_keys',
+            pinnedKeys: 'pinned_keys',
+            recvCounters: 'recv_counters'
         }
     },
 

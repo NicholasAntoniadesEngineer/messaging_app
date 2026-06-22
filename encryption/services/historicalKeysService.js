@@ -59,7 +59,7 @@ const HistoricalKeysService = {
      * @param {number} epoch - Key epoch
      */
     async storeKey(userId, publicKeyB64, epoch) {
-        console.log(`[HistoricalKeysService] Storing key: user=${userId.slice(0, 8)}..., epoch=${epoch}`);
+        console.log(`[HistoricalKeysService] Storing key: epoch=${epoch}`);
 
         // Store in database (authoritative)
         if (this._database) {
@@ -96,7 +96,7 @@ const HistoricalKeysService = {
      * @returns {Promise<string|null>} Base64-encoded public key or null
      */
     async getKeyForEpoch(userId, epoch) {
-        console.log(`[HistoricalKeysService] Getting key: user=${userId.slice(0, 8)}..., epoch=${epoch}`);
+        console.log(`[HistoricalKeysService] Getting key: epoch=${epoch}`);
 
         // Try IndexedDB cache first (faster)
         try {
@@ -137,7 +137,7 @@ const HistoricalKeysService = {
                     console.log('[HistoricalKeysService] Found key in database');
                     return publicKey;
                 } else {
-                    console.warn(`[HistoricalKeysService] No key found in ${tableName} for user=${userId.slice(0, 8)}..., epoch=${epoch}`);
+                    console.warn(`[HistoricalKeysService] No key found in ${tableName} for epoch=${epoch}`);
                 }
             } catch (error) {
                 console.error('[HistoricalKeysService] Database lookup failed:', error);
@@ -159,8 +159,6 @@ const HistoricalKeysService = {
             return null;
         }
 
-        console.log(`[HistoricalKeysService] getCurrentKey: Looking up public key for user ${userId.substring(0, 8)}...`);
-
         const identityTable = this._config?.tables?.identityKeys || 'identity_keys';
 
         try {
@@ -173,14 +171,13 @@ const HistoricalKeysService = {
             const returnedUserId = result.data?.[0]?.user_id;
 
             if (publicKey) {
-                console.log(`[HistoricalKeysService] getCurrentKey: Found key for user ${returnedUserId?.substring(0, 8)}...: ${publicKey.substring(0, 20)}...`);
-
-                // SAFETY CHECK: Verify we got the right user's key
+                // SAFETY CHECK: Verify we got the right user's key. (Do not log the
+                // public key or user-id prefixes - SM-07/SM-48 metadata hygiene.)
                 if (returnedUserId && returnedUserId !== userId) {
-                    console.error(`[HistoricalKeysService] getCurrentKey: DATA MISMATCH! Requested ${userId.substring(0, 8)}... but got ${returnedUserId.substring(0, 8)}...`);
+                    console.error('[HistoricalKeysService] getCurrentKey: DATA MISMATCH - returned user does not match requested user');
                 }
             } else {
-                console.warn(`[HistoricalKeysService] getCurrentKey: No key found for user ${userId.substring(0, 8)}...`);
+                console.warn('[HistoricalKeysService] getCurrentKey: No key found for requested user');
             }
 
             return publicKey;
