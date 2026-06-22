@@ -86,3 +86,73 @@ input, textarea, select {
 input::placeholder, textarea::placeholder {
     color: var(--color-text-muted);
 }
+
+/* ============================================================================
+   LAYOUT — flat, full-bleed messenger.
+   Deliberately NOT a floating rounded "panel/side-tab" (the generic AI-app look):
+   no outer card radius, no drop shadow, no centered inset, no per-row cards or
+   left-accent bars. A clean edge-to-edge surface with simple list dividers.
+   ============================================================================ */
+
+/* Outer container: fill the width, drop the centered floating inset. */
+.messenger-main,
+.subscription-main,
+.settings-main,
+main.page-container {
+    max-width: 100%;
+    margin: 0;
+    padding: var(--space-4);
+    padding-top: calc(var(--header-height, 56px) + var(--space-4));
+}
+
+/* The section is part of the page, not a floating card. */
+.messenger-section,
+.settings-card,
+.form-section {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.messenger-controls {
+    background: transparent;
+    border-bottom: 1px solid var(--color-border-light);
+    border-radius: 0;
+}
+
+/* Conversation list: flat rows with dividers, no floating cards / accent bars. */
+.conversations-list {
+    gap: 0;
+    padding: 0;
+}
+.conversation-card {
+    background: transparent;
+    border: none;
+    border-left: none;
+    border-bottom: 1px solid var(--color-border-light);
+    border-radius: 0;
+    box-shadow: none;
+    transform: none;
+    transition: background var(--duration-fast, 0.12s) var(--ease-default, ease);
+}
+.conversation-card:hover,
+.conversation-card.unread {
+    background: var(--color-bg-elevated);
+    border-left: none;
+    transform: none;
+    box-shadow: none;
+}
+.conversation-card.active {
+    background: var(--color-action-subtle);
+    border-left: none;
+    box-shadow: none;
+}
+
+/* Message thread surface: flat, no floating-card chrome. */
+.message-thread,
+.message-input-container {
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
