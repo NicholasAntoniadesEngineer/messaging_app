@@ -727,8 +727,9 @@ const UpgradeController = {
             console.log('[UpgradeController] Creating checkout session for upgrade...');
             
             const supabaseProjectUrl = window.SupabaseConfig?.PROJECT_URL || 'https://ofutzrxfbrgtbkyafndv.supabase.co';
-            const backendEndpoint = `${supabaseProjectUrl}/functions/v1/create-checkout-session`;
-            
+            // Deployed function is named 'checkout-session' (NOT 'create-checkout-session', which 404s).
+            const backendEndpoint = `${supabaseProjectUrl}/functions/v1/checkout-session`;
+
             let result;
             
             if (useStripeService && window.StripeService && typeof window.StripeService.createCheckoutSession === 'function') {

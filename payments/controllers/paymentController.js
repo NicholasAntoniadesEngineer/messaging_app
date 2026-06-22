@@ -472,9 +472,9 @@ const PaymentController = {
             
             // Supabase Edge Function endpoint for creating checkout sessions
             // INSTRUCTIONS: See payments/backend/UPDATE_PAYMENT_CONTROLLER.md
-            // Replace 'ofutzrxfbrgtbkyafndv' with your actual Supabase project reference ID if different
-            const supabaseProjectUrl = 'https://ofutzrxfbrgtbkyafndv.supabase.co';
-            const backendEndpoint = `${supabaseProjectUrl}/functions/v1/create-checkout-session`;
+            const supabaseProjectUrl = window.SupabaseConfig?.PROJECT_URL || 'https://ofutzrxfbrgtbkyafndv.supabase.co';
+            // Deployed function is named 'checkout-session' (NOT 'create-checkout-session', which 404s).
+            const backendEndpoint = `${supabaseProjectUrl}/functions/v1/checkout-session`;
             
             const result = await window.StripeService.createCheckoutSession(
                 currentUser.email,
