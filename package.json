@@ -1,0 +1,17 @@
+{
+  "name": "money-tracker",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Personal finance and budgeting application with E2E encryption",
+  "scripts": {
+    "dev": "vite",
+    "build:css": "npx @tailwindcss/cli -i ./shared/styles/main.css -o ./shared/styles/main-compiled.css --minify",
+    "build": "npm run build:css && vite build",
+    "watch:css": "npx @tailwindcss/cli -i ./shared/styles/main.css -o ./shared/styles/main-compiled.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.0"
+  }
+}

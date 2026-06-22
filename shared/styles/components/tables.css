@@ -1,0 +1,337 @@
+/* ============================================================================
+   TABLE COMPONENTS
+   ============================================================================ */
+
+table:not(.data-table) {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background-color: rgba(216, 216, 216, 0.85);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: var(--spacing-lg);
+    border: var(--border-width-thin) solid var(--border-color-black);
+}
+
+table:not(.data-table) th,
+table:not(.data-table) td {
+    line-height: var(--line-height-reduced);
+    padding-top: calc(var(--spacing-xs) * var(--spacing-multiplier-reduced));
+    padding-bottom: calc(var(--spacing-xs) * var(--spacing-multiplier-reduced));
+    padding-left: var(--spacing-sm);
+    padding-right: var(--spacing-sm);
+    background-color: rgba(221, 221, 221, 0.85);
+    border: var(--border-width-thin) solid var(--border-color-black);
+}
+
+table:not(.data-table) th:first-child,
+table:not(.data-table) td:first-child {
+    border-left: var(--border-width-thin) solid var(--border-color-black);
+}
+
+table:not(.data-table) thead th {
+    border-top: var(--border-width-thin) solid var(--border-color-black);
+}
+
+table:not(.data-table) thead th:last-child {
+    border-right: var(--border-width-thin) solid var(--border-color-black);
+}
+
+table:not(.data-table) tbody tr:last-child td,
+table:not(.data-table) tfoot tr:last-child td {
+    border-bottom: var(--border-width-thin) solid var(--border-color-black);
+}
+
+table:not(.data-table) tbody tr:last-child td:last-child {
+    border-right: var(--border-width-thin) solid var(--border-color-black);
+}
+
+table:not(.data-table) tfoot tr:last-child td:last-child {
+    border-right: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background-color: rgba(213, 213, 213, 0.85);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: var(--spacing-lg);
+    border: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table th {
+    background-color: rgba(208, 208, 208, 0.85);
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-reduced)) var(--spacing-sm);
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-primary);
+    border: var(--border-width-thin) solid var(--border-color-black);
+    white-space: nowrap;
+}
+
+.data-table th:first-child {
+    border-left: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table thead th {
+    border-top: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table thead th:last-child {
+    border-right: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table td {
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-medium)) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border-color-black);
+    background-color: rgba(221, 221, 221, 0.85);
+    white-space: nowrap;
+}
+
+.data-table td:first-child {
+    border-left: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table tbody tr:last-child td,
+.data-table tfoot tr:last-child td {
+    border-bottom: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table tbody tr:last-child td:last-child {
+    border-right: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table tfoot tr:last-child td:last-child {
+    border-right: var(--border-width-thin) solid var(--border-color-black);
+}
+
+.data-table tr {
+    background-color: rgba(221, 221, 221, 0.85);
+}
+
+.data-table tr:hover {
+    background-color: rgba(208, 208, 208, 0.85);
+}
+
+.data-table input[type="number"],
+.data-table input[type="text"],
+.data-table input[type="date"],
+.data-table select,
+.data-table textarea {
+    width: 100%;
+    padding: var(--spacing-xs);
+    border: var(--border-width-standard) solid var(--border-color);
+    border-radius: 0px;
+    font-size: 0.875rem;
+    background-color: #ffffff;
+    color: var(--text-primary);
+}
+
+.data-table input::placeholder,
+.data-table textarea::placeholder,
+.data-table input::-webkit-input-placeholder,
+.data-table textarea::-webkit-input-placeholder,
+.data-table input::-moz-placeholder,
+.data-table textarea::-moz-placeholder,
+.data-table input:-ms-input-placeholder,
+.data-table textarea:-ms-input-placeholder {
+    color: var(--text-placeholder);
+    opacity: 1;
+}
+
+.data-table .total-row {
+    font-weight: 600;
+    background-color: rgba(200, 200, 200, 0.85);
+}
+
+#weekly-breakdown-table {
+    border-radius: 0px;
+    table-layout: auto;
+    width: 100%;
+    min-width: 800px;
+}
+
+#weekly-breakdown-table th,
+#weekly-breakdown-table td {
+    white-space: nowrap;
+}
+
+#weekly-breakdown-table th:first-child,
+#weekly-breakdown-table td:first-child {
+    width: 100px;
+    min-width: 80px;
+    max-width: 120px;
+}
+
+#weekly-breakdown-table th:nth-child(2),
+#weekly-breakdown-table td:nth-child(2) {
+    width: auto;
+    min-width: 180px;
+    max-width: 350px;
+}
+
+#weekly-breakdown-table th:nth-child(n+3):not(:nth-last-child(2)):not(:nth-last-child(3)):not(:last-child),
+#weekly-breakdown-table td:nth-child(n+3):not(:nth-last-child(2)):not(:nth-last-child(3)):not(:last-child) {
+    width: auto;
+    min-width: 150px;
+    max-width: 250px;
+}
+
+#weekly-breakdown-table th:nth-last-child(3),
+#weekly-breakdown-table td:nth-last-child(3) {
+    width: auto;
+    min-width: 100px;
+    max-width: 150px;
+}
+
+#weekly-breakdown-table th:nth-last-child(2),
+#weekly-breakdown-table td:nth-last-child(2) {
+    width: auto;
+    min-width: 100px;
+    max-width: 150px;
+}
+
+#weekly-breakdown-table th:last-child,
+#weekly-breakdown-table td:last-child {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+}
+
+#weekly-breakdown-table .delete-column-header {
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-reduced)) var(--spacing-sm);
+    border: none !important;
+    background-color: transparent !important;
+    text-align: center;
+}
+
+#weekly-breakdown-table td:last-child {
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-medium)) var(--spacing-sm);
+    border: none !important;
+    background-color: transparent !important;
+    text-align: center;
+}
+
+#weekly-breakdown-tbody input,
+#weekly-breakdown-tbody textarea {
+    border-color: var(--border-color-black);
+}
+
+.data-table:not(#weekly-breakdown-table) .delete-column-header {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-reduced)) var(--spacing-sm);
+    border: none !important;
+    background-color: transparent !important;
+    text-align: center;
+}
+
+#months-comparison-table .delete-column-header {
+    width: auto;
+    min-width: 120px;
+    max-width: 150px;
+}
+
+#months-comparison-table td:last-child {
+    width: auto;
+    min-width: 120px;
+    max-width: 150px;
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-medium)) var(--spacing-sm);
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-medium)) var(--spacing-sm);
+}
+
+.data-table:not(#weekly-breakdown-table) td:last-child:has(.delete-row-x) {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-medium)) var(--spacing-sm);
+    border: none !important;
+    background-color: transparent !important;
+    text-align: center;
+}
+
+.data-table tbody tr:last-child td:last-child,
+.data-table tfoot tr:last-child td:last-child,
+.data-table .total-row td:last-child {
+    border: none !important;
+    background-color: rgba(221, 221, 221, 0.85) !important;
+}
+
+#weekly-breakdown-table tbody tr:last-child td:last-child,
+#weekly-breakdown-table .total-row td:last-child {
+    border: none !important;
+    background-color: rgba(221, 221, 221, 0.85) !important;
+}
+
+.delete-row-x {
+    cursor: pointer;
+    color: var(--danger-color);
+    font-size: 1.4rem;
+    font-weight: bold;
+    padding: 0;
+    line-height: 1;
+    user-select: none;
+    background: transparent;
+    border: none;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    border-radius: 0;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.delete-row-x:hover {
+    color: var(--danger-hover);
+    background-color: rgba(181, 138, 138, 0.2);
+}
+
+.delete-row-x:active {
+    transform: scale(0.9);
+}
+
+.data-table td:last-child:has(.btn):has(.delete-row-x) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: calc(var(--spacing-xs) * var(--spacing-multiplier-medium)) var(--spacing-sm);
+    width: auto;
+    min-width: 120px;
+    max-width: 150px;
+}
+
+#months-comparison-table td:last-child:has(.btn):has(.delete-row-x) {
+    min-width: 120px;
+    max-width: 150px;
+}
+
+.data-table td:last-child:has(.btn):has(.delete-row-x) .delete-row-x {
+    margin-left: auto;
+}
+
+/* ============================================================================
+   DATE AND CARD COLUMN MINIMUM WIDTHS
+   Ensures these columns never shrink narrower than their content
+   ============================================================================ */
+
+/* Date inputs - compact width for date text (e.g., "31st") */
+.data-table .income-date,
+.data-table .fixed-cost-date,
+.data-table .unplanned-date {
+    min-width: 4em;
+    width: 5em;
+}
+
+/* Card inputs - compact width */
+.data-table .fixed-cost-card,
+.data-table .unplanned-card {
+    min-width: 5em;
+    width: 7em;
+}

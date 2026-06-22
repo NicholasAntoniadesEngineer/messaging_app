@@ -1,0 +1,11 @@
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+
+.loading-message,
+.empty-message {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: var(--spacing-md);
+    font-style: italic;
+}

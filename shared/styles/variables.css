@@ -1,0 +1,97 @@
+/* ============================================================================
+   CSS VARIABLES (Design Tokens)
+   ============================================================================ */
+
+:root {
+    /* ============================================
+       COLOR PALETTE - Centralized Color Scheme
+       ============================================ */
+    
+    /* Primary Colors */
+    --primary-color: #b0b0b0;
+    --primary-hover: #a0a0a0;
+    --primary-focus-shadow: rgba(168, 168, 168, 0.3);
+    
+    /* Secondary Colors */
+    --secondary-color: #b5b1aa;
+    --secondary-hover: #c5bdbd;
+    
+    /* Status Colors */
+    --success-color: #7bab8a;
+    --success-hover: #4d6a57;
+    --warning-color: #b5a58a;
+    --danger-color: #b58a8a;
+    --action-color: #7b9bab;
+    --action-hover: #4d6a7a;
+    --danger-hover: #7d4545;
+    
+    /* Background Colors */
+    --background-color: #c5c3c3;
+    --surface-color: #d0d0d0;
+    --surface-color-darker: #c5c5c5;
+    --surface-overlay-light: rgba(200, 196, 196, 0.98);
+    --surface-overlay-medium: rgba(180, 180, 180, 1.0);
+    --surface-overlay-section: rgba(180, 180, 180, 0.85);
+    --surface-overlay-card: rgba(180, 180, 180, 0.75);
+    --surface-overlay-card-landing: rgba(180, 180, 180, 0.80);
+    --surface-overlay-button: rgba(255, 255, 255, 0.6);
+    --surface-overlay-button-hover: rgba(255, 255, 255, 0.8);
+    
+    /* Text Colors */
+    --text-primary: #1b1b1b;
+    --text-secondary: #1a1a1a;
+    --text-white: #f1f1f1;
+    --text-black: #000000;
+    --text-placeholder: #ffffff;
+    --text-positive: #006c22;
+    
+    /* Border Colors */
+    --border-color: #9d9d9d;
+    --border-color-dark: #1f1f1f;
+    --border-color-black: #000000;
+    --border-print: #000000;
+    
+    /* Border Widths */
+    --border-width-thin: 0.2px;
+    --border-width-standard: 1px;
+    --border-width-thick: 2px;
+    
+    /* Interactive States */
+    --hover-overlay: rgba(255, 255, 255, 0.7);
+    --landing-overlay: rgba(202, 202, 202, 0.5);
+    --table-row-hover: #d3d3d3;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.55);
+    
+    /* Spacing */
+    --spacing-xs: 0.55rem;
+    --spacing-sm: 0.5rem;
+    --spacing-md: 0.75rem;
+    --spacing-lg: 1rem;
+    --spacing-xl: 1.5rem;
+    
+    /* Spacing Multipliers (for reduced spacing) */
+    --spacing-multiplier-reduced: 0.2;
+    --spacing-multiplier-medium: 0.3;
+    --spacing-multiplier-standard: 0.8;
+    
+    /* Typography */
+    --line-height-base: 1.28;
+    --line-height-reduced: 1.28;
+    
+    /* Layout */
+    --border-radius: 0px;
+    --border-radius-multiplier: 1;
+    --transition: all 0.5s ease-in-out;
+    
+    /* Layout Dimensions */
+    --max-width-content: 1200px;
+    --viewport-spacing-top: 5vh;
+    --month-title-padding-left: 5%;
+    
+    /* Background Images */
+    --site-background: url('../assets/siteBackgroundImage.jpg');
+}

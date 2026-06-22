@@ -1,0 +1,137 @@
+/* ============================================================================
+   FORM COMPONENTS
+   ============================================================================ */
+
+.form-section {
+    background-color: rgba(220, 220, 220, 0.85);
+    border: var(--border-width-standard) solid var(--border-color-dark);
+    border-radius: calc(var(--border-radius) * var(--border-radius-multiplier));
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.working-section {
+    border-radius: 0px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.months-comparison-section {
+    background-color: rgba(220, 220, 220, 0.85);
+    border-radius: calc(var(--border-radius) * var(--border-radius-multiplier));
+}
+
+.form-group {
+    margin-bottom: var(--spacing-sm);
+}
+
+.form-label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: var(--spacing-xs);
+    color: var(--text-primary);
+}
+
+.form-input,
+.form-textarea {
+    width: 100%;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-standard) solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+    font-weight: 500;
+    transition: var(--transition);
+    font-family: inherit;
+    background-color: rgba(230, 230, 230, 0.85);
+    color: var(--text-primary);
+}
+
+/* Dropdowns - consistent styling matching buttons */
+.form-select {
+    width: 100%;
+    height: 1.9rem;
+    min-height: 1.9rem;
+    max-height: 1.9rem;
+    padding: 0.3rem 0.5rem;
+    border: var(--border-width-standard) solid var(--border-color-black);
+    border-radius: 0px;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1;
+    box-sizing: border-box;
+    transition: var(--transition);
+    font-family: inherit;
+    background-color: rgba(230, 230, 230, 0.85);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px var(--primary-focus-shadow);
+}
+
+#copy-income-from-month,
+#copy-fixed-costs-from-month,
+#copy-variable-costs-from-month,
+#copy-unplanned-from-month {
+    width: auto !important;
+    min-width: fit-content;
+}
+
+.form-textarea {
+    resize: vertical;
+    min-height: 100px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+    background-color: rgba(230, 230, 230, 0.85);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+    font-weight: 500;
+}
+
+/* Ensure select options have consistent font weight */
+select option {
+    font-weight: 500;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* Read-only inputs - calculated values */
+input[readonly] {
+    background-color: rgba(200, 200, 200, 0.6);
+    cursor: not-allowed;
+    font-style: italic;
+    opacity: 0.8;
+}
+
+input::placeholder,
+textarea::placeholder,
+select::placeholder,
+input::-webkit-input-placeholder,
+textarea::-webkit-input-placeholder,
+select::-webkit-input-placeholder,
+input::-moz-placeholder,
+textarea::-moz-placeholder,
+select::-moz-placeholder,
+input:-ms-input-placeholder,
+textarea:-ms-input-placeholder,
+select:-ms-input-placeholder {
+    color: var(--text-placeholder);
+    opacity: 1;
+}
