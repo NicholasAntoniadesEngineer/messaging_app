@@ -6,6 +6,40 @@
 const MessagingService = {
     _encryptionFacade: null,
 
+    // SM-23: lightweight client-side throttle so a user cannot spam send /
+    // conversation-creation. A short minimum interval plus an in-flight guard.
+    // Tuned well below normal typing/sending cadence so it never blocks a human.
+    _SEND_MIN_INTERVAL_MS: 400,
+    _CONVERSATION_MIN_INTERVAL_MS: 1000,
+    _lastSendAt: 0,
+    _lastConversationCreateAt: 0,
+    _sendInFlight: false,
+    _conversationCreateInFlight: false,
+
+    /**
+     * SM-43: validate an id is a positive integer or a numeric string for one.
+     * @param {number|string} id
+     * @returns {boolean}
+     */
+    _isValidId(id) {
+        if (typeof id === 'number') {
+            return Number.isInteger(id) && id > 0;
+        }
+        if (typeof id === 'string' && /^\d+$/.test(id)) {
+            return parseInt(id, 10) > 0;
+        }
+        return false;
+    },
+
+    /**
+     * SM-43: validate a user id (UUID string from Supabase Auth, non-empty).
+     * @param {string} id
+     * @returns {boolean}
+     */
+    _isValidUserId(id) {
+        return typeof id === 'string' && id.trim().length > 0 && id.length <= 128;
+    },
+
     _getDatabaseService() {
         if (typeof DatabaseConfigHelper === 'undefined') {
             throw new Error('DatabaseConfigHelper not available');
@@ -39,6 +73,16 @@ const MessagingService = {
     async getOrCreateConversation(user1Id, user2Id) {
         // SM-48: do not log participant user ids (social-graph metadata).
         try {
+            // SM-43: validate participant ids before touching the DB.
+            if (!this._isValidUserId(user1Id) || !this._isValidUserId(user2Id)) {
+                return { success: false, conversation: null, error: 'Invalid participant' };
+            }
+
+            // SM-25: never create a conversation with yourself / an invalid peer.
+            if (user1Id === user2Id) {
+                return { success: false, conversation: null, error: 'Cannot start a conversation with yourself' };
+            }
+
             const db = this._getDatabaseService();
             const [orderedUser1, orderedUser2] = user1Id < user2Id ? [user1Id, user2Id] : [user2Id, user1Id];
             const table = this._getTableName('conversations');
@@ -58,11 +102,28 @@ const MessagingService = {
                 return { success: true, conversation: existing.data[0], error: null };
             }
 
-            const result = await db.queryInsert(table, {
-                user1_id: orderedUser1,
-                user2_id: orderedUser2,
-                last_message_at: new Date().toISOString()
-            });
+            // SM-23: throttle NEW conversation creation (opening an existing one
+            // above is never throttled). In-flight guard + minimum interval.
+            if (this._conversationCreateInFlight) {
+                return { success: false, conversation: null, error: 'Please wait — still creating the conversation.' };
+            }
+            const sinceLastCreate = Date.now() - this._lastConversationCreateAt;
+            if (sinceLastCreate < this._CONVERSATION_MIN_INTERVAL_MS) {
+                return { success: false, conversation: null, error: 'You are creating conversations too quickly. Please wait a moment.' };
+            }
+            this._conversationCreateInFlight = true;
+
+            let result;
+            try {
+                result = await db.queryInsert(table, {
+                    user1_id: orderedUser1,
+                    user2_id: orderedUser2,
+                    last_message_at: new Date().toISOString()
+                });
+            } finally {
+                this._lastConversationCreateAt = Date.now();
+                this._conversationCreateInFlight = false;
+            }
 
             if (result.error) {
                 console.error('[MessagingService] Error creating conversation:', result.error);
@@ -86,6 +147,32 @@ const MessagingService = {
     async sendMessage(conversationId, senderId, recipientId, content) {
         // SM-48: do not log participant ids or message metadata (social-graph leak).
         try {
+            // SM-43: validate ids/recipient types at the entry point.
+            if (!this._isValidId(conversationId)) {
+                return { success: false, message: null, error: 'Invalid conversation' };
+            }
+            if (!this._isValidUserId(senderId) || !this._isValidUserId(recipientId)) {
+                return { success: false, message: null, error: 'Invalid recipient' };
+            }
+
+            // SM-25: refuse to send to yourself at the service boundary.
+            if (senderId === recipientId) {
+                return { success: false, message: null, error: 'You cannot send a message to yourself.' };
+            }
+
+            // SM-23: throttle send. In-flight guard prevents double-submit; a
+            // small minimum interval blocks scripted spam without affecting a
+            // human's normal sending cadence.
+            if (this._sendInFlight) {
+                return { success: false, message: null, error: 'Please wait — your previous message is still sending.' };
+            }
+            const sinceLastSend = Date.now() - this._lastSendAt;
+            if (sinceLastSend < this._SEND_MIN_INTERVAL_MS) {
+                return { success: false, message: null, error: 'You are sending messages too quickly. Please slow down.' };
+            }
+            this._sendInFlight = true;
+            try {
+
             const db = this._getDatabaseService();
 
             // Check if blocked
@@ -164,6 +251,12 @@ const MessagingService = {
             }
 
             return { success: true, message: newMessage, error: null };
+            } finally {
+                // SM-23: always release the in-flight guard and stamp the time,
+                // so a failed/blocked send still resets the throttle correctly.
+                this._lastSendAt = Date.now();
+                this._sendInFlight = false;
+            }
         } catch (error) {
             console.error('[MessagingService] sendMessage error:', error);
             return { success: false, message: null, error: error.message };
@@ -234,6 +327,11 @@ const MessagingService = {
 
     async getMessages(conversationId, options = {}) {
         try {
+            // SM-43: validate the conversation id at the entry point.
+            if (!this._isValidId(conversationId)) {
+                return { success: false, messages: null, error: 'Invalid conversation' };
+            }
+
             const db = this._getDatabaseService();
             const table = this._getTableName('messages');
 
@@ -303,6 +401,11 @@ const MessagingService = {
 
     async markMessageAsRead(messageId, userId) {
         try {
+            // SM-43: validate id/user at the entry point.
+            if (!this._isValidId(messageId) || !this._isValidUserId(userId)) {
+                return { success: false, error: 'Invalid request' };
+            }
+
             const db = this._getDatabaseService();
             const table = this._getTableName('messages');
 
@@ -328,6 +431,11 @@ const MessagingService = {
     async markConversationAsRead(conversationId, userId) {
         console.log('[MessagingService] markConversationAsRead()', { conversationId, userId });
         try {
+            // SM-43: validate id/user at the entry point.
+            if (!this._isValidId(conversationId) || !this._isValidUserId(userId)) {
+                return { success: false, error: 'Invalid request' };
+            }
+
             const db = this._getDatabaseService();
             const result = await db.queryUpdate(this._getTableName('messages'), null, {
                 read: true,
@@ -353,6 +461,11 @@ const MessagingService = {
 
     async getUnreadCountForConversation(conversationId, userId) {
         try {
+            // SM-43: validate id/user at the entry point.
+            if (!this._isValidId(conversationId) || !this._isValidUserId(userId)) {
+                return { success: false, count: 0, error: 'Invalid request' };
+            }
+
             const db = this._getDatabaseService();
             const result = await db.querySelect(this._getTableName('messages'), {
                 filter: { conversation_id: conversationId, recipient_id: userId, read: false },
@@ -420,6 +533,11 @@ const MessagingService = {
     async subscribeToConversation(conversationId, callback) {
         console.log('[MessagingService] subscribeToConversation()', { conversationId });
         try {
+            // SM-43: validate the conversation id at the entry point.
+            if (!this._isValidId(conversationId)) {
+                return { success: false, subscription: null, error: 'Invalid conversation' };
+            }
+
             const db = this._getDatabaseService();
             if (!db?.client?.channel) {
                 throw new Error('Real-time not available');

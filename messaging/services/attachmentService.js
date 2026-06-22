@@ -21,6 +21,73 @@ const AttachmentService = {
     MAX_FILE_SIZE: 1 * 1024 * 1024, // 1MB default
 
     /**
+     * SM-28: content types that can render/execute inline in the app origin
+     * (HTML, SVG, XHTML, scripts). Uploads with these declared types are
+     * rejected, and on DOWNLOAD the Blob is always built with a neutral
+     * application/octet-stream type so the browser cannot render them inline.
+     */
+    DANGEROUS_MIME_TYPES: [
+        'text/html',
+        'application/xhtml+xml',
+        'image/svg+xml',
+        'text/xml',
+        'application/xml',
+        'application/javascript',
+        'text/javascript',
+        'application/x-javascript',
+        'application/ecmascript',
+        'text/ecmascript'
+    ],
+
+    /**
+     * SM-28: file extensions whose content the browser may treat as
+     * active/renderable regardless of the declared MIME type.
+     */
+    DANGEROUS_EXTENSIONS: [
+        'html', 'htm', 'xhtml', 'shtml', 'svg', 'js', 'mjs', 'xml', 'xht'
+    ],
+
+    /**
+     * SM-28: decide whether an attachment's declared type/name is risky to
+     * render inline. Used both at upload (reject) and download (force a safe
+     * blob type). Conservative: matches by MIME and by file extension.
+     * @param {string} mimeType - declared MIME type
+     * @param {string} fileName - original file name
+     * @returns {boolean} true when the attachment must not render inline
+     */
+    _isDangerousType(mimeType, fileName) {
+        const type = (mimeType || '').toLowerCase().split(';')[0].trim();
+        if (type && this.DANGEROUS_MIME_TYPES.includes(type)) {
+            return true;
+        }
+        const name = (fileName || '').toLowerCase();
+        const dot = name.lastIndexOf('.');
+        if (dot !== -1) {
+            const ext = name.slice(dot + 1);
+            if (this.DANGEROUS_EXTENSIONS.includes(ext)) {
+                return true;
+            }
+        }
+        return false;
+    },
+
+    /**
+     * SM-28: pick the content type to use when building the download Blob.
+     * Risky types are coerced to application/octet-stream so a malicious
+     * attachment cannot render inline in the origin; images/pdf/normal docs
+     * keep their original type so they still preview/open as expected.
+     * @param {string} mimeType - stored MIME type
+     * @param {string} fileName - stored file name
+     * @returns {string} safe content type for the Blob
+     */
+    _safeDownloadType(mimeType, fileName) {
+        if (this._isDangerousType(mimeType, fileName)) {
+            return 'application/octet-stream';
+        }
+        return mimeType || 'application/octet-stream';
+    },
+
+    /**
      * Whether the storage bucket is available
      */
     _bucketAvailable: null,
@@ -115,19 +182,70 @@ const AttachmentService = {
      * @returns {Promise<{valid: boolean, reason: string|null}>}
      */
     async validateFile(file) {
+        // SM-43: validate the input is actually a file before anything else.
+        if (!file || typeof file.size !== 'number' || typeof file.name !== 'string') {
+            return { valid: false, reason: 'No valid file selected' };
+        }
+
         const canUploadCheck = await this.canUpload();
         if (!canUploadCheck.allowed) {
             return { valid: false, reason: canUploadCheck.reason };
         }
 
-        // Check file size only - any file type is allowed since we encrypt everything
-        if (file.size > canUploadCheck.maxSizeBytes) {
-            const maxMB = Math.round(canUploadCheck.maxSizeBytes / (1024 * 1024));
+        // SM-33: reject empty files (nothing to encrypt/upload).
+        if (file.size <= 0) {
+            return { valid: false, reason: 'File is empty' };
+        }
+
+        // SM-33: enforce the size limit strictly BEFORE any encrypt/upload work.
+        const maxSizeBytes = canUploadCheck.maxSizeBytes || this.MAX_FILE_SIZE;
+        if (file.size > maxSizeBytes) {
+            const maxMB = Math.round(maxSizeBytes / (1024 * 1024));
             const fileMB = (file.size / (1024 * 1024)).toFixed(1);
             return { valid: false, reason: `File size (${fileMB}MB) exceeds limit of ${maxMB}MB` };
         }
 
+        // SM-28: reject content types that can render/execute inline in the
+        // origin (HTML, SVG, XHTML, scripts). Everything else (images, pdf,
+        // normal docs, archives) is still allowed since we encrypt the bytes.
+        if (this._isDangerousType(file.type, file.name)) {
+            return {
+                valid: false,
+                reason: 'This file type is not allowed for security reasons (HTML, SVG, XML, or script files).'
+            };
+        }
+
         return { valid: true, reason: null };
+    },
+
+    /**
+     * SM-43: validate an attachment/message id is a positive integer (or a
+     * numeric string for one). Ids come from the DOM/realtime payloads.
+     * @param {number|string} id
+     * @returns {boolean}
+     */
+    _isValidId(id) {
+        if (typeof id === 'number') {
+            return Number.isInteger(id) && id > 0;
+        }
+        if (typeof id === 'string' && /^\d+$/.test(id)) {
+            return parseInt(id, 10) > 0;
+        }
+        return false;
+    },
+
+    /**
+     * SM-29: treat an attachment as expired once it is past expires_at.
+     * Missing/invalid timestamps are treated as NOT expired (fail open to
+     * normal handling; server cleanup is the source of truth for deletion).
+     * @param {string} expiresAt - ISO timestamp
+     * @returns {boolean}
+     */
+    _isExpired(expiresAt) {
+        if (!expiresAt) return false;
+        const t = new Date(expiresAt).getTime();
+        if (Number.isNaN(t)) return false;
+        return t < Date.now();
     },
 
     /**
@@ -360,6 +478,11 @@ const AttachmentService = {
      */
     async downloadAttachment(attachmentId) {
         try {
+            // SM-43: validate the id at the service boundary.
+            if (!this._isValidId(attachmentId)) {
+                return { success: false, error: 'Invalid attachment id' };
+            }
+
             const client = this._getClient();
             if (!client) {
                 throw new Error('Database client not available');
@@ -376,8 +499,9 @@ const AttachmentService = {
                 throw new Error('Attachment not found');
             }
 
-            // Check if expired
-            if (new Date(attachment.expires_at) < new Date()) {
+            // SM-29: never download an attachment past its expiry. Server
+            // cleanup handles deletion; here we just refuse to fetch it.
+            if (this._isExpired(attachment.expires_at)) {
                 throw new Error('Attachment has expired');
             }
 
@@ -414,9 +538,15 @@ const AttachmentService = {
 
             console.log('[AttachmentService] ✓ Downloaded:', attachment.file_name);
 
+            // SM-28: build the Blob with a SAFE content type. Risky types
+            // (html/svg/xhtml/xml/js, by MIME or extension) are coerced to
+            // application/octet-stream so they cannot render inline in the
+            // origin; images/pdf/normal docs keep their real type.
             return {
                 success: true,
-                data: new Blob([decryptedData], { type: attachment.mime_type }),
+                data: new Blob([decryptedData], {
+                    type: this._safeDownloadType(attachment.mime_type, attachment.file_name)
+                }),
                 fileName: attachment.file_name
             };
         } catch (error) {
@@ -432,6 +562,12 @@ const AttachmentService = {
      */
     async getMessageAttachments(messageId) {
         try {
+            // SM-43: validate the id before building the query.
+            if (!this._isValidId(messageId)) {
+                console.warn('[AttachmentService] getMessageAttachments: invalid message id');
+                return [];
+            }
+
             const client = this._getClient();
             if (!client) return [];
 
@@ -446,7 +582,12 @@ const AttachmentService = {
                 return [];
             }
 
-            return data || [];
+            // SM-29: flag expired attachments so the UI shows "expired" and
+            // does not attempt a (refused) download. Server cleanup deletes them.
+            return (data || []).map(att => ({
+                ...att,
+                expired: this._isExpired(att.expires_at)
+            }));
         } catch (error) {
             console.error('[AttachmentService] Error:', error);
             return [];
@@ -460,6 +601,11 @@ const AttachmentService = {
      */
     async deleteAttachment(attachmentId) {
         try {
+            // SM-43: validate the id at the service boundary.
+            if (!this._isValidId(attachmentId)) {
+                return { success: false, error: 'Invalid attachment id' };
+            }
+
             const client = this._getClient();
             if (!client) {
                 throw new Error('Database client not available');

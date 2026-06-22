@@ -929,22 +929,8 @@ const MessengerController = {
         let attachmentsHtml = '';
         const attachments = message.attachments || [];
         if (attachments.length > 0) {
-            const attachmentItems = attachments.map(att => {
-                const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
-                const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
-                const fileName = att.fileName || att.file_name || 'Attachment';
-                const attId = att.id;
-                return `
-                    <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
-                        <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
-                        <div style="flex: 1; min-width: 0;">
-                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
-                            <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
-                        </div>
-                        <i class="fas fa-download" style="opacity: 0.6;"></i>
-                    </div>
-                `;
-            }).join('');
+            // SM-29: expired attachments render as expired / non-clickable.
+            const attachmentItems = attachments.map(att => this._renderAttachmentItem(att)).join('');
             attachmentsHtml = `<div class="message-attachments">${attachmentItems}</div>`;
         }
 
@@ -989,23 +975,8 @@ const MessengerController = {
             return;
         }
 
-        // Build attachment HTML
-        const attachmentItems = attachments.map(att => {
-            const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
-            const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
-            const fileName = att.fileName || att.file_name || 'Attachment';
-            const attId = att.id;
-            return `
-                <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
-                    <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
-                        <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
-                    </div>
-                    <i class="fas fa-download" style="opacity: 0.6;"></i>
-                </div>
-            `;
-        }).join('');
+        // Build attachment HTML (SM-29: expired -> non-clickable expired row)
+        const attachmentItems = attachments.map(att => this._renderAttachmentItem(att)).join('');
 
         const attachmentsDiv = document.createElement('div');
         attachmentsDiv.className = 'message-attachments';
@@ -1019,6 +990,48 @@ const MessengerController = {
             messageEl.appendChild(attachmentsDiv);
         }
 
+    },
+
+    /**
+     * SM-29: render a single attachment item. Expired attachments (per the
+     * service's `expired` flag, or a past `expires_at`) are shown as expired
+     * and are NOT clickable — no download is attempted (server cleanup
+     * handles deletion). Non-expired items keep the normal download behavior.
+     * @param {Object} att - attachment record
+     * @returns {string} HTML for one attachment row
+     */
+    _renderAttachmentItem(att) {
+        const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
+        const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
+        const fileName = att.fileName || att.file_name || 'Attachment';
+        const attId = att.id;
+
+        const expiresAt = att.expiresAt || att.expires_at;
+        const isExpired = att.expired === true ||
+            (expiresAt && !Number.isNaN(new Date(expiresAt).getTime()) && new Date(expiresAt).getTime() < Date.now());
+
+        if (isExpired) {
+            return `
+                <div class="message-attachment message-attachment-expired" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.08); border-radius: 6px; opacity: 0.6;">
+                    <i class="fas fa-clock" style="font-size: 1.1em;"></i>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
+                        <div style="font-size: 0.75em; opacity: 0.7;">Expired</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
+                <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
+                <div style="flex: 1; min-width: 0;">
+                    <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
+                    <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
+                </div>
+                <i class="fas fa-download" style="opacity: 0.6;"></i>
+            </div>
+        `;
     },
 
     /**
@@ -1107,22 +1120,8 @@ const MessengerController = {
             let attachmentsHtml = '';
             const attachments = msg.attachments || [];
             if (attachments.length > 0) {
-                const attachmentItems = attachments.map(att => {
-                    const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
-                    const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
-                    const fileName = att.fileName || att.file_name || 'Attachment';
-                    const attId = att.id;
-                    return `
-                        <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
-                            <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
-                                <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
-                            </div>
-                            <i class="fas fa-download" style="opacity: 0.6;"></i>
-                        </div>
-                    `;
-                }).join('');
+                // SM-29: expired attachments render as expired / non-clickable.
+                const attachmentItems = attachments.map(att => this._renderAttachmentItem(att)).join('');
                 attachmentsHtml = `<div class="message-attachments">${attachmentItems}</div>`;
             }
 
@@ -1372,6 +1371,12 @@ const MessengerController = {
             return;
         }
 
+        // SM-43: ignore malformed ids before doing any work.
+        if (!(Number.isInteger(attachmentId) && attachmentId > 0)) {
+            console.warn('[MessengerController] downloadAttachment: invalid id');
+            return;
+        }
+
         // Find and update the attachment element to show loading state
         const attachmentEl = document.querySelector(`[data-attachment-id="${attachmentId}"]`);
         const originalContent = attachmentEl?.innerHTML;
@@ -1458,22 +1463,8 @@ const MessengerController = {
             let attachmentsHtml = '';
             const attachments = message.attachments || [];
             if (attachments.length > 0) {
-                const attachmentItems = attachments.map(att => {
-                    const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
-                    const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
-                    const fileName = att.fileName || att.file_name || 'Attachment';
-                    const attId = att.id;
-                    return `
-                        <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
-                            <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
-                                <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
-                            </div>
-                            <i class="fas fa-download" style="opacity: 0.6;"></i>
-                        </div>
-                    `;
-                }).join('');
+                // SM-29: expired attachments render as expired / non-clickable.
+                const attachmentItems = attachments.map(att => this._renderAttachmentItem(att)).join('');
                 attachmentsHtml = `<div class="message-attachments">${attachmentItems}</div>`;
             }
 
