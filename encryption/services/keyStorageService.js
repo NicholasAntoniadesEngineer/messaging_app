@@ -277,18 +277,70 @@ const KeyStorageService = {
             return null;
         }
 
-        const wrapKey = await this._getOrCreateWrapKey();
-        const secretBuffer = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv: record.wrapIv },
-            wrapKey,
-            record.wrappedSecret
-        );
+        // A wrapped identity record IS present. From here on, "no usable key" and
+        // "key present but currently unreadable" are DIFFERENT outcomes and must
+        // not collapse to the same null. Returning null here would push a
+        // same-device user (who has a perfectly good wrapped key) into the
+        // restore / recovery-key flow on every login. Instead, an unwrap failure
+        // throws a typed, identifiable error so callers can decide deliberately.
+        let wrapKey;
+        try {
+            wrapKey = await this._getOrCreateWrapKey();
+        } catch (wrapKeyError) {
+            const err = new Error('[KeyStorageService] Identity wrap key unavailable - cannot unwrap stored secret');
+            err.code = 'WRAP_KEY_UNAVAILABLE';
+            err.cause = wrapKeyError;
+            throw err;
+        }
+
+        let secretBuffer;
+        try {
+            secretBuffer = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: record.wrapIv },
+                wrapKey,
+                record.wrappedSecret
+            );
+        } catch (decryptError) {
+            // The wrapped secret exists but this wrap key cannot open it (e.g. the
+            // CryptoKey was regenerated, or the record was written under a different
+            // key). This is NOT "no keys" - surface it distinctly so the caller does
+            // not silently loop into recovery. We deliberately do NOT clearAll() here:
+            // wiping a present-but-unreadable record is what produced the
+            // recovery-prompt-every-login regression.
+            console.error('[KeyStorageService] Failed to unwrap identity secret:', decryptError);
+            const err = new Error('[KeyStorageService] Stored identity secret could not be unwrapped');
+            err.code = 'IDENTITY_UNWRAP_FAILED';
+            err.cause = decryptError;
+            throw err;
+        }
 
         return {
             publicKey: CryptoPrimitivesService.deserializeKey(record.publicKey),
             secretKey: new Uint8Array(secretBuffer),
             createdAt: record.createdAt
         };
+    },
+
+    /**
+     * Whether a wrapped identity record physically exists for this user,
+     * regardless of whether it can currently be unwrapped. Lets callers tell
+     * "this device has a local identity (be careful before wiping)" apart from
+     * "genuinely no local identity (safe to restore/generate)".
+     * @param {string} userId - User ID
+     * @returns {Promise<boolean>}
+     */
+    async hasWrappedIdentity(userId) {
+        this._ensureInitialized();
+
+        const record = await new Promise((resolve, reject) => {
+            const tx = this.db.transaction('identity_keys', 'readonly');
+            const store = tx.objectStore('identity_keys');
+            const request = store.get(userId);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error);
+        });
+
+        return !!(record && record.wrappedSecret && record.wrapIv);
     },
 
     /**

@@ -76,7 +76,32 @@ const KeyManagementService = {
             KeyBackupService.initialize(config);
             PasswordCryptoService.initialize(config);
 
-            let keys = await KeyStorageService.getIdentityKeys(userId);
+            let keys;
+            try {
+                keys = await KeyStorageService.getIdentityKeys(userId);
+            } catch (identityError) {
+                // The wrapped identity record physically exists but could not be
+                // unwrapped this session (wrap key missing/unusable - e.g. Safari
+                // evicted the CryptoKey, or the record was written under a different
+                // wrap key). This is a same-device user WITH a local identity, not a
+                // "no keys" situation. We must NOT silently force the recovery prompt
+                // and we must NOT wipe the record (a future session may unwrap it).
+                // Surface it deterministically so the caller can decide.
+                if (identityError &&
+                    (identityError.code === 'IDENTITY_UNWRAP_FAILED' ||
+                     identityError.code === 'WRAP_KEY_UNAVAILABLE')) {
+                    console.error('[KeyManagementService] Local identity present but unreadable this session:', identityError.code);
+                    const hasBackup = await KeyBackupService.hasBackup(userId);
+                    return {
+                        success: false,
+                        needsRestore: hasBackup,
+                        hasBackup,
+                        identityUnreadable: true,
+                        error: identityError.code
+                    };
+                }
+                throw identityError;
+            }
 
             if (!keys) {
                 const hasBackup = await KeyBackupService.hasBackup(userId);
@@ -89,7 +114,19 @@ const KeyManagementService = {
                 return { success: true, keysExist: false };
             }
 
-            // Verify local keys match database
+            // Verify local keys match database.
+            //
+            // On the SAME device the local (successfully-unwrapped) identity key is
+            // the source of truth: it is the private half we actually encrypt with.
+            // A difference vs the server's published public key is almost always a
+            // benign server lag (e.g. the server row was never updated after a
+            // clean-break restore, or another device's epoch propagated). The old
+            // behaviour - clearAll() + demand restore on ANY difference - is exactly
+            // what asked a same-device user for the recovery key on every login.
+            //
+            // Correct behaviour: trust the working local key and RE-UPLOAD it to the
+            // server (self-heal), instead of destroying it. We never wipe a valid
+            // local identity here.
             const localPublicKeyB64 = CryptoPrimitivesService.serializeKey(keys.publicKey);
             const dbPublicKey = await HistoricalKeysService.getCurrentKey(userId);
 
@@ -97,34 +134,8 @@ const KeyManagementService = {
                 console.log('[KeyManagementService] Server key missing, uploading local key');
                 await this._uploadPublicKeyToServer(userId, localPublicKeyB64);
             } else if (localPublicKeyB64 !== dbPublicKey) {
-                console.log('[KeyManagementService] Key mismatch, clearing invalid local keys');
-                await KeyStorageService.clearAll();
-
-                const hasBackup = await KeyBackupService.hasBackup(userId);
-                if (hasBackup) {
-                    return { success: false, needsRestore: true, keyMismatch: true, hasBackup: true };
-                }
-
-                // No backup - generate new keys
-                console.log('[KeyManagementService] No backup, generating fresh keys');
-                const newKeys = CryptoPrimitivesService.generateKeyPair();
-                const newPublicKeyB64 = CryptoPrimitivesService.serializeKey(newKeys.publicKey);
-
-                await KeyStorageService.storeIdentityKeys(userId, newKeys);
-                await this._uploadPublicKeyToServer(userId, newPublicKeyB64);
-
-                await this._fetchCurrentEpoch(userId);
-                const newEpoch = this.currentEpoch + 1;
-                await HistoricalKeysService.storeKey(userId, newPublicKeyB64, newEpoch);
-
-                if (this._database) {
-                    const identityTable = this._config?.tables?.identityKeys || 'identity_keys';
-                    await this._database.queryUpdate(identityTable, {
-                        current_epoch: newEpoch,
-                        updated_at: new Date().toISOString()
-                    }, { filter: { user_id: userId } });
-                }
-                this.currentEpoch = newEpoch;
+                console.log('[KeyManagementService] Local/server public key differ - re-publishing local key (no wipe)');
+                await this._uploadPublicKeyToServer(userId, localPublicKeyB64);
             }
 
             await this._fetchCurrentEpoch(userId);

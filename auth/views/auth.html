@@ -610,7 +610,27 @@
                 }
 
                 const userId = currentUser.id;
-                const keys = await window.KeyStorageService.getIdentityKeys(userId);
+
+                let keys = null;
+                let identityUnreadable = false;
+                try {
+                    keys = await window.KeyStorageService.getIdentityKeys(userId);
+                } catch (identityError) {
+                    // A wrapped identity record EXISTS on this device but could not be
+                    // unwrapped this session (e.g. the at-rest wrap key was evicted).
+                    // This is NOT a fresh device - do not sign the user out and do not
+                    // jump straight to the recovery-key screen. Fall through to the
+                    // password-backup restore path, which re-establishes a usable
+                    // wrapped record for next time.
+                    if (identityError &&
+                        (identityError.code === 'IDENTITY_UNWRAP_FAILED' ||
+                         identityError.code === 'WRAP_KEY_UNAVAILABLE')) {
+                        console.warn('[Auth] Local identity present but unreadable this session:', identityError.code);
+                        identityUnreadable = true;
+                    } else {
+                        throw identityError;
+                    }
+                }
 
                 if (keys && keys.publicKey && keys.secretKey) {
                     console.log('[Auth] Encryption keys found locally - redirecting');
