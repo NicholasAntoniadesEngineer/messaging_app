@@ -144,7 +144,8 @@ GRANT USAGE, SELECT ON SEQUENCE payments_id_seq TO authenticated;
 INSERT INTO subscription_plans (name, description, stripe_price_id, price_cents, interval, features, is_active)
 VALUES
     ('Free', 'Limited access after your trial ends', NULL, 0, 'month', '["Account & contacts", "Upgrade to send encrypted messages"]'::jsonb, true),
-    ('Premium', 'Full end-to-end encrypted messaging', NULL, 999, 'month', '["Unlimited E2E encrypted messaging", "Encrypted file attachments", "Multi-device sync", "Priority support"]'::jsonb, true)
+    -- stripe_price_id: Stripe test Price (Secure Messenger Premium, £9.99/mo). Replace for prod/live.
+    ('Premium', 'Full end-to-end encrypted messaging', 'price_1Tl87aClUqvgxZvpUn4uUrx6', 999, 'month', '["Unlimited E2E encrypted messaging", "Encrypted file attachments", "Multi-device sync", "Priority support"]'::jsonb, true)
 ON CONFLICT (name) DO UPDATE SET
     description = EXCLUDED.description,
     price_cents = EXCLUDED.price_cents,

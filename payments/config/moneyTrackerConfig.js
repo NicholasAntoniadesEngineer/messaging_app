@@ -27,13 +27,13 @@ const MoneyTrackerPaymentsConfig = PaymentsConfigBase.merge({
     backend: {
         // Same Supabase project as the rest of the app (see database/config/supabaseConfig.js)
         baseUrl: (typeof window !== 'undefined' && window.SupabaseConfig && window.SupabaseConfig.PROJECT_URL) || 'https://ofutzrxfbrgtbkyafndv.supabase.co',
-        // Endpoint paths match the edge functions already deployed for the shared backend
+        // Endpoint paths match the edge functions ACTUALLY deployed on the shared backend
+        // (verified via probe). Checkout is deployed as 'checkout-session' (NOT
+        // 'create-checkout-session', which 404s). create-customer/update-subscription/
+        // list-invoices are not deployed, so those features (invoices, downgrade) are inert.
         endpoints: {
-            createCheckoutSession: '/functions/v1/create-checkout-session',
+            createCheckoutSession: '/functions/v1/checkout-session',
             createPortalSession: '/functions/v1/create-portal-session',
-            createCustomer: '/functions/v1/create-customer',
-            updateSubscription: '/functions/v1/update-subscription',
-            listInvoices: '/functions/v1/list-invoices',
             stripeWebhook: '/functions/v1/stripe-webhook'
         },
         getAuthHeaders: null // Will use auth service by default
