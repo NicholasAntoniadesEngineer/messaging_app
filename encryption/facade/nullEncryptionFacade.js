@@ -53,29 +53,22 @@ const NullEncryptionFacade = {
     },
 
     /**
-     * "Encrypt" a message (returns plaintext)
-     * @param {number|string} conversationId - Conversation ID
-     * @param {string} plaintext - Message
-     * @param {string} recipientId - Recipient's user ID
-     * @returns {Promise<Object>}
+     * SM-37(a): FAIL CLOSED. This facade must never emit or accept plaintext.
+     * The silent plaintext-emit primitive is removed entirely, so even an
+     * accidental wiring cannot downgrade a conversation to cleartext.
+     * @throws {Error} Always
      */
     async encryptMessage(conversationId, plaintext, recipientId) {
-        return {
-            content: plaintext,
-            isEncrypted: false
-        };
+        throw new Error('Encryption required');
     },
 
     /**
-     * "Decrypt" a message (returns content as-is)
-     * @param {number|string} conversationId - Conversation ID
-     * @param {Object} data - Message data (plaintext content)
-     * @param {string} senderId - Sender's user ID
-     * @returns {Promise<string>}
+     * SM-37(a): FAIL CLOSED. Never pass ciphertext-less content through as if it
+     * were decrypted plaintext.
+     * @throws {Error} Always
      */
     async decryptMessage(conversationId, data, senderId) {
-        // For plaintext messages, content is passed directly
-        return data.content || data;
+        throw new Error('Encryption required');
     },
 
     /**

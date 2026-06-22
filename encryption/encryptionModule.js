@@ -84,6 +84,9 @@ const EncryptionModule = {
         await CryptoLibraryLoader.load();
 
         this.enabled = true;
+        // SM-37(a): the real-user facade is ALWAYS EncryptionFacade. The plaintext
+        // NullEncryptionFacade is fenced off and is never selectable at runtime /
+        // from a server-supplied flag. Encryption is required for everyone.
         this._facade = EncryptionFacade;
         this.initialized = true;
 

@@ -46,7 +46,7 @@ class KeyNotFoundError extends EncryptionError {
      */
     constructor(keyType, userId = null, epoch = null) {
         const details = [];
-        if (userId) details.push(`user: ${userId.slice(0, 8)}...`);
+        // SM-48: do not embed user-id prefixes in error messages (metadata hygiene).
         if (epoch !== null) details.push(`epoch: ${epoch}`);
 
         super(

@@ -30,7 +30,10 @@ async function initEncryptionModule() {
         'KeyBackupService',
         'KeyManagementService',
         'EncryptionFacade',
-        'NullEncryptionFacade',
+        // SM-37(a): NullEncryptionFacade is intentionally NOT a required dependency.
+        // The plaintext path is fenced off; the module only ever selects
+        // EncryptionFacade. A tiered build that needs the null facade must opt in
+        // behind an explicit, server-independent build flag - never load it by default.
         'EncryptionModule'
     ];
 

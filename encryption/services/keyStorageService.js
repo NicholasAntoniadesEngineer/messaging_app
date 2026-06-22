@@ -67,7 +67,11 @@ const KeyStorageService = {
                 console.log('[KeyStorageService] Upgrading database schema...');
                 const db = event.target.result;
 
-                // Identity keys store
+                // Identity keys store. Record shape changed at v2: the secret is now
+                // stored as AES-GCM ciphertext (wrappedSecret + wrapIv), never as
+                // plaintext base64. The keyPath is unchanged so legacy v1 rows remain
+                // physically present until getIdentityKeys detects + disposes them
+                // (clean-break migration).
                 if (!db.objectStoreNames.contains('identity_keys')) {
                     db.createObjectStore('identity_keys', { keyPath: 'userId' });
                     console.log('[KeyStorageService] Created identity_keys store');
@@ -92,6 +96,29 @@ const KeyStorageService = {
                     console.log('[KeyStorageService] Created historical_keys store');
                 }
 
+                // SM-02: Wrap-key store. Holds the non-extractable AES-GCM CryptoKey
+                // used to wrap the identity secret at rest. IndexedDB persists a
+                // CryptoKey via structured clone WITHOUT exposing raw bytes, and an
+                // extractable:false key round-trips while remaining non-extractable.
+                if (!db.objectStoreNames.contains('wrap_keys')) {
+                    db.createObjectStore('wrap_keys', { keyPath: 'id' });
+                    console.log('[KeyStorageService] Created wrap_keys store');
+                }
+
+                // SM-01: TOFU pin store. One pinned peer public key per userId.
+                if (!db.objectStoreNames.contains('pinned_keys')) {
+                    db.createObjectStore('pinned_keys', { keyPath: 'userId' });
+                    console.log('[KeyStorageService] Created pinned_keys store');
+                }
+
+                // SM-10: Replay high-water marks, keyed per (conversationId, epoch, senderId).
+                if (!db.objectStoreNames.contains('recv_counters')) {
+                    db.createObjectStore('recv_counters', {
+                        keyPath: ['conversationId', 'epoch', 'senderId']
+                    });
+                    console.log('[KeyStorageService] Created recv_counters store');
+                }
+
                 console.log('[KeyStorageService] Database schema upgrade complete');
             };
         });
@@ -107,30 +134,97 @@ const KeyStorageService = {
         }
     },
 
+    // ==================== Identity Secret Wrapping (SM-02) ====================
+
+    /**
+     * Fixed id of the singleton identity-wrap key record.
+     * @private
+     */
+    _WRAP_KEY_ID: 'identity-wrap-v1',
+
+    /**
+     * Get (or lazily create) the non-extractable AES-GCM key used to wrap the
+     * identity secret at rest. Generated once per browser profile and reused for
+     * all identity writes. The key never exposes raw bytes: it is created with
+     * extractable:false and persisted via IndexedDB structured clone.
+     * @private
+     * @returns {Promise<CryptoKey>}
+     */
+    async _getOrCreateWrapKey() {
+        this._ensureInitialized();
+
+        if (typeof crypto === 'undefined' || !crypto.subtle) {
+            throw new Error('[KeyStorageService] WebCrypto SubtleCrypto unavailable - cannot wrap identity secret');
+        }
+
+        const existing = await new Promise((resolve, reject) => {
+            const tx = this.db.transaction('wrap_keys', 'readonly');
+            const store = tx.objectStore('wrap_keys');
+            const request = store.get(this._WRAP_KEY_ID);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error);
+        });
+
+        if (existing && existing.key) {
+            return existing.key;
+        }
+
+        const key = await crypto.subtle.generateKey(
+            { name: 'AES-GCM', length: 256 },
+            false, // non-extractable: raw bytes can never leave the browser
+            ['encrypt', 'decrypt']
+        );
+
+        await new Promise((resolve, reject) => {
+            const tx = this.db.transaction('wrap_keys', 'readwrite');
+            const store = tx.objectStore('wrap_keys');
+            const request = store.put({ id: this._WRAP_KEY_ID, key });
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+
+        console.log('[KeyStorageService] Generated identity wrap key');
+        return key;
+    },
+
     // ==================== Identity Keys ====================
 
     /**
-     * Store identity keys for a user
+     * Store identity keys for a user.
+     * SM-02: the raw secret bytes are NEVER persisted. We encrypt them with the
+     * non-extractable AES-GCM wrap key and store only the ciphertext + IV. The
+     * public key stays plaintext base64 (it is not secret).
      * @param {string} userId - User ID
      * @param {Object} keys - { publicKey: Uint8Array, secretKey: Uint8Array }
      */
     async storeIdentityKeys(userId, keys) {
         this._ensureInitialized();
 
-        const serialized = {
+        const wrapKey = await this._getOrCreateWrapKey();
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+
+        // keys.secretKey is a raw Uint8Array that exists only in the JS heap.
+        const wrappedSecret = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            wrapKey,
+            keys.secretKey
+        );
+
+        const record = {
             userId,
             publicKey: CryptoPrimitivesService.serializeKey(keys.publicKey),
-            secretKey: CryptoPrimitivesService.serializeKey(keys.secretKey),
+            wrappedSecret, // ArrayBuffer of AES-GCM ciphertext
+            wrapIv: iv,    // Uint8Array(12)
             createdAt: new Date().toISOString()
         };
 
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction('identity_keys', 'readwrite');
             const store = tx.objectStore('identity_keys');
-            const request = store.put(serialized);
+            const request = store.put(record);
 
             request.onsuccess = () => {
-                console.log('[KeyStorageService] Identity keys stored');
+                console.log('[KeyStorageService] Identity keys stored (secret wrapped)');
                 resolve();
             };
 
@@ -142,37 +236,59 @@ const KeyStorageService = {
     },
 
     /**
-     * Get identity keys for a user
+     * Get identity keys for a user.
+     * SM-02: unwraps the stored AES-GCM ciphertext with the non-extractable wrap
+     * key and returns the same { publicKey, secretKey } Uint8Array shape callers
+     * expect, so the ECDH derivation chain is byte-identical.
+     *
+     * Clean-break migration: a legacy v1 plaintext record (has `secretKey`, no
+     * `wrappedSecret`) is intentionally disposable - we wipe local state and
+     * return null so the caller falls into its existing restore-or-generate path.
      * @param {string} userId - User ID
      * @returns {Promise<Object|null>} { publicKey: Uint8Array, secretKey: Uint8Array } or null
      */
     async getIdentityKeys(userId) {
         this._ensureInitialized();
 
-        return new Promise((resolve, reject) => {
+        const record = await new Promise((resolve, reject) => {
             const tx = this.db.transaction('identity_keys', 'readonly');
             const store = tx.objectStore('identity_keys');
             const request = store.get(userId);
-
-            request.onsuccess = () => {
-                const result = request.result;
-                if (!result) {
-                    resolve(null);
-                    return;
-                }
-
-                resolve({
-                    publicKey: CryptoPrimitivesService.deserializeKey(result.publicKey),
-                    secretKey: CryptoPrimitivesService.deserializeKey(result.secretKey),
-                    createdAt: result.createdAt
-                });
-            };
-
+            request.onsuccess = () => resolve(request.result || null);
             request.onerror = () => {
                 console.error('[KeyStorageService] Failed to get identity keys:', request.error);
                 reject(request.error);
             };
         });
+
+        if (!record) {
+            return null;
+        }
+
+        // Clean-break migration: legacy plaintext record present.
+        if (record.secretKey && !record.wrappedSecret) {
+            console.warn('[KeyStorageService] Legacy plaintext identity record found - disposing (clean break)');
+            await this.clearAll();
+            return null;
+        }
+
+        if (!record.wrappedSecret || !record.wrapIv) {
+            console.error('[KeyStorageService] Identity record missing wrapped secret');
+            return null;
+        }
+
+        const wrapKey = await this._getOrCreateWrapKey();
+        const secretBuffer = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: record.wrapIv },
+            wrapKey,
+            record.wrappedSecret
+        );
+
+        return {
+            publicKey: CryptoPrimitivesService.deserializeKey(record.publicKey),
+            secretKey: new Uint8Array(secretBuffer),
+            createdAt: record.createdAt
+        };
     },
 
     /**
@@ -484,15 +600,156 @@ const KeyStorageService = {
         });
     },
 
+    // ==================== Pinned Keys (TOFU - SM-01) ====================
+
+    /**
+     * Get the pinned public key record for a peer.
+     * @param {string} userId - Peer user ID
+     * @returns {Promise<Object|null>} { userId, publicKey, fingerprint, pinnedAt, lastWarnedFingerprint } or null
+     */
+    async getPinnedKey(userId) {
+        this._ensureInitialized();
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction('pinned_keys', 'readonly');
+            const store = tx.objectStore('pinned_keys');
+            const request = store.get(userId);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => {
+                console.error('[KeyStorageService] Failed to get pinned key:', request.error);
+                reject(request.error);
+            };
+        });
+    },
+
+    /**
+     * Pin (or re-pin) a peer's public key. Preserves an existing
+     * lastWarnedFingerprint so we only warn once per distinct new key.
+     * @param {string} userId - Peer user ID
+     * @param {string} publicKeyB64 - Base64 public key
+     * @param {string} fingerprint - Key fingerprint
+     */
+    async pinKey(userId, publicKeyB64, fingerprint) {
+        this._ensureInitialized();
+
+        const existing = await this.getPinnedKey(userId);
+        const record = {
+            userId,
+            publicKey: publicKeyB64,
+            fingerprint,
+            pinnedAt: new Date().toISOString(),
+            lastWarnedFingerprint: existing ? existing.lastWarnedFingerprint || null : null
+        };
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction('pinned_keys', 'readwrite');
+            const store = tx.objectStore('pinned_keys');
+            const request = store.put(record);
+            request.onsuccess = () => resolve();
+            request.onerror = () => {
+                console.error('[KeyStorageService] Failed to pin key:', request.error);
+                reject(request.error);
+            };
+        });
+    },
+
+    /**
+     * Record that we have already warned the user about a given new fingerprint
+     * for this peer, so the warning is one-shot per distinct new key.
+     * @param {string} userId - Peer user ID
+     * @param {string} fingerprint - The new fingerprint we warned about
+     */
+    async updatePinnedWarn(userId, fingerprint) {
+        this._ensureInitialized();
+
+        const existing = await this.getPinnedKey(userId);
+        if (!existing) {
+            return;
+        }
+        existing.lastWarnedFingerprint = fingerprint;
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction('pinned_keys', 'readwrite');
+            const store = tx.objectStore('pinned_keys');
+            const request = store.put(existing);
+            request.onsuccess = () => resolve();
+            request.onerror = () => {
+                console.error('[KeyStorageService] Failed to update pinned warn:', request.error);
+                reject(request.error);
+            };
+        });
+    },
+
+    // ==================== Replay Counters (SM-10) ====================
+
+    /**
+     * Get the last accepted message counter for a (conversation, epoch, sender).
+     * @param {number|string} conversationId - Conversation ID
+     * @param {number} epoch - Key epoch
+     * @param {string} senderId - Sender user ID
+     * @returns {Promise<number>} Last counter, or -1 if none recorded
+     */
+    async getLastCounter(conversationId, epoch, senderId) {
+        this._ensureInitialized();
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction('recv_counters', 'readonly');
+            const store = tx.objectStore('recv_counters');
+            const request = store.get([String(conversationId), epoch, senderId]);
+            request.onsuccess = () => {
+                const result = request.result;
+                resolve(result ? result.lastCounter : -1);
+            };
+            request.onerror = () => {
+                console.error('[KeyStorageService] Failed to get last counter:', request.error);
+                reject(request.error);
+            };
+        });
+    },
+
+    /**
+     * Persist the high-water counter for a (conversation, epoch, sender).
+     * @param {number|string} conversationId - Conversation ID
+     * @param {number} epoch - Key epoch
+     * @param {string} senderId - Sender user ID
+     * @param {number} n - The counter to record as the new high-water mark
+     */
+    async setLastCounter(conversationId, epoch, senderId, n) {
+        this._ensureInitialized();
+
+        const record = {
+            conversationId: String(conversationId),
+            epoch,
+            senderId,
+            lastCounter: n,
+            updatedAt: new Date().toISOString()
+        };
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction('recv_counters', 'readwrite');
+            const store = tx.objectStore('recv_counters');
+            const request = store.put(record);
+            request.onsuccess = () => resolve();
+            request.onerror = () => {
+                console.error('[KeyStorageService] Failed to set last counter:', request.error);
+                reject(request.error);
+            };
+        });
+    },
+
     // ==================== Database Management ====================
 
     /**
-     * Clear all data from all stores
+     * Clear all data from all stores.
+     * NOTE: the wrap_keys store is intentionally preserved - the non-extractable
+     * AES-GCM wrap key is per-browser-profile and reused across identity
+     * re-generation / restore. pinned_keys and recv_counters are local caches
+     * that safely rebuild (TOFU re-pins, counters default to -1).
      */
     async clearAll() {
         this._ensureInitialized();
 
-        const stores = ['identity_keys', 'session_keys', 'historical_keys'];
+        const stores = ['identity_keys', 'session_keys', 'historical_keys', 'pinned_keys', 'recv_counters'];
 
         for (const storeName of stores) {
             await new Promise((resolve, reject) => {
