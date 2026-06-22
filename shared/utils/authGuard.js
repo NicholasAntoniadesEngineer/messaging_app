@@ -80,8 +80,31 @@ const AuthGuard = {
             
             console.log('[AuthGuard] User authenticated:', window.AuthService.getCurrentUser()?.email);
 
-            // Secure Messenger is ungated: no subscription/permission tier checks.
-            // Access is governed purely by authentication + Supabase row-level security.
+            // Subscription gate (BUSINESS gate, not a security boundary — Supabase RLS is the
+            // security boundary). New users get a 30-day trial via the create_trial_subscription
+            // trigger, so the app is usable before any Stripe setup. On error we fail OPEN
+            // (grant access) so a flaky billing check never locks a paying/trial user out.
+            if (window.PaymentsModuleInitPromise) {
+                try { await window.PaymentsModuleInitPromise; } catch (e) { /* continue */ }
+            }
+            if (window.SubscriptionChecker) {
+                try {
+                    const access = await window.SubscriptionChecker.checkAccess();
+                    if (!access.hasAccess && access.status === 'no_subscription') {
+                        console.log('[AuthGuard] No subscription/trial found, redirecting to subscription page');
+                        this.redirectToPayment();
+                        return false;
+                    }
+                    // trial_expired / expired / cancelled -> allow with reduced privileges (UI gates features)
+                } catch (subErr) {
+                    console.warn('[AuthGuard] Subscription check failed; allowing access (fail-open business gate):', subErr?.message);
+                }
+            }
+
+            // Initialize feature-permission tiers (used by the UI to gate Premium features)
+            if (window.PermissionService) {
+                try { await window.PermissionService.initialize(); } catch (e) { console.warn('[AuthGuard] PermissionService init failed:', e?.message); }
+            }
 
             return true;
         } catch (error) {
@@ -159,72 +182,26 @@ const AuthGuard = {
         }
         
         const currentPath = window.location.pathname;
-        console.log('[AuthGuard] redirectToPayment - Current path:', currentPath);
-        console.log('[AuthGuard] redirectToPayment - Current origin:', window.location.origin);
-        
-        // Don't redirect if already on settings page
-        if (currentPath.includes('settings.html')) {
-            console.log('[AuthGuard] Already on settings page, skipping redirect');
+
+        // Don't redirect if already on the subscription page
+        if (currentPath.includes('subscription.html')) {
             return;
         }
-        
+
         this.redirecting = true;
-        
-        // Construct absolute URL to avoid path resolution issues
-        const baseUrl = window.location.origin;
-        const pathParts = currentPath.split('/').filter(p => p && p !== 'index.html');
 
-        // Get all module names from registry
-        const modules = window.ModuleRegistry?.getAllModuleNames() || [];
-
-        // Find the base path (everything before any known module or 'ui')
-        let basePathParts = [];
-        for (let i = 0; i < pathParts.length; i++) {
-            if (pathParts[i] === 'ui' || modules.includes(pathParts[i])) {
-                break;
-            }
-            basePathParts.push(pathParts[i]);
-        }
-
-        // Construct the settings URL (subscription section)
-        const basePath = basePathParts.length > 0 ? basePathParts.join('/') + '/' : '';
-        const settingsUrl = `${baseUrl}/${basePath}settings/views/settings.html`;
-        
-        console.log('[AuthGuard] Redirecting to settings page:', settingsUrl);
-        console.log('[AuthGuard] Path calculation:', {
-            currentPath: currentPath,
-            pathParts: pathParts,
-            basePathParts: basePathParts,
-            basePath: basePath,
-            settingsUrl: settingsUrl,
-            origin: baseUrl,
-            fullUrl: settingsUrl
-        });
-        
-        // Verify the URL is valid before redirecting
+        // Resolve the subscription page via the Header module-path helper when available
+        let url = '../../payments/views/subscription.html';
         try {
-            const testUrl = new URL(settingsUrl);
-            console.log('[AuthGuard] Settings URL is valid:', {
-                href: testUrl.href,
-                origin: testUrl.origin,
-                pathname: testUrl.pathname,
-                search: testUrl.search
-            });
-        } catch (urlError) {
-            console.error('[AuthGuard] ❌ Invalid settings URL:', urlError);
-            console.error('[AuthGuard] Settings URL that failed:', settingsUrl);
-            // Fallback to relative path
-            const fallbackPath = currentPath.includes('/ui/views/')
-                ? 'settings.html'
-                : currentPath.includes('/ui/')
-                ? '../settings/views/settings.html'
-                : 'settings/views/settings.html';
-            console.log('[AuthGuard] Using fallback path:', fallbackPath);
-            window.location.href = fallbackPath;
-            return;
+            if (window.Header && typeof window.Header.getModulePath === 'function') {
+                url = window.Header.getModulePath('payments') + 'subscription.html';
+            }
+        } catch (e) {
+            /* fall back to the relative path */
         }
-        
-        window.location.href = settingsUrl;
+
+        console.log('[AuthGuard] Redirecting to subscription page:', url);
+        window.location.href = url;
     },
 
     /**

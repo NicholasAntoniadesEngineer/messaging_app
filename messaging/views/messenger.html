@@ -3,10 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Content-Security-Policy (SM-19): restricts script/connect origins. connect-src blocks
+         exfiltration to arbitrary hosts (defense-in-depth behind output escaping). 'unsafe-inline'
+         for scripts is a known gap pending removal of inline handlers/blocks. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>Secure Messenger</title>
     <link rel="stylesheet" href="../../shared/vendor/font-awesome/css/all.min.css">
     <link rel="stylesheet" href="../../shared/styles/main-compiled.css">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="../../shared/vendor/supabase/supabase.min.js"></script>
     <script>
         (function() {
             var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
@@ -151,7 +155,19 @@
     <!-- Initialize Database Module -->
     <script src="../../database/initDatabase.js"></script>
     
-    <!-- Payments, subscription gating and permission tiers removed: Secure Messenger is standalone and ungated -->
+    <!-- Payments / Subscription Module -->
+    <script src="../../payments/config/paymentsConfigBase.js"></script>
+    <script src="../../payments/config/moneyTrackerConfig.js"></script>
+    <script src="../../payments/utils/configHelper.js"></script>
+    <script src="../../payments/paymentsModule.js"></script>
+    <script src="../../payments/services/stripeService.js"></script>
+    <script src="../../payments/services/paymentService.js"></script>
+    <script src="../../payments/services/subscriptionService.js"></script>
+    <script src="../../payments/utils/subscriptionChecker.js"></script>
+    <script src="../../payments/initPayments.js"></script>
+    <script src="../../payments/utils/waitForPaymentsInit.js"></script>
+    <script src="../../shared/utils/subscriptionGuard.js"></script>
+    <script src="../../shared/utils/permissionService.js"></script>
     <script src="../../shared/utils/authGuard.js"></script>
     <script src="../../shared/utils/networkUtils.js"></script>
     <script src="../../shared/utils/offlineHandler.js"></script>
@@ -271,6 +287,21 @@
             });
 
             try {
+                // SM-45: enforce authentication (and the subscription/business gate) BEFORE
+                // initializing the UI. AuthGuard.checkAuth() validates the session server-side
+                // and redirects to the sign-in page if the user is not authenticated.
+                if (window.AuthGuard && typeof window.AuthGuard.checkAuth === 'function') {
+                    const authed = await window.AuthGuard.checkAuth();
+                    if (!authed) {
+                        console.log('[MessengerPage] Not authenticated — AuthGuard is redirecting.');
+                        return;
+                    }
+                } else {
+                    console.error('[MessengerPage] AuthGuard unavailable; refusing to load messenger.');
+                    window.location.href = '../../auth/views/auth.html';
+                    return;
+                }
+
                 console.log('[MessengerPage] Step 1: Waiting for Header to be available...');
                 const headerWaitStart = Date.now();
                 await waitFor(() => typeof window.Header !== 'undefined', 'Header', 10000);

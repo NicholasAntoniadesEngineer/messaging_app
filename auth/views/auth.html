@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Content-Security-Policy (SM-19) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>Secure Messenger - Sign In</title>
     <link rel="stylesheet" href="../../shared/vendor/font-awesome/css/all.min.css">
     <link rel="stylesheet" href="../../shared/styles/main-compiled.css">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="../../shared/vendor/supabase/supabase.min.js"></script>
     <script>
         (function() {
             var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
@@ -264,7 +266,17 @@
     <!-- Messaging Service -->
     <script src="../../messaging/services/messagingService.js"></script>
 
-    <!-- Payments / subscription stack removed: Secure Messenger is standalone and ungated -->
+    <!-- Payments / Subscription Module -->
+    <script src="../../payments/config/paymentsConfigBase.js"></script>
+    <script src="../../payments/config/moneyTrackerConfig.js"></script>
+    <script src="../../payments/utils/configHelper.js"></script>
+    <script src="../../payments/paymentsModule.js"></script>
+    <script src="../../payments/services/stripeService.js"></script>
+    <script src="../../payments/services/paymentService.js"></script>
+    <script src="../../payments/services/subscriptionService.js"></script>
+    <script src="../../payments/utils/subscriptionChecker.js"></script>
+    <script src="../../payments/initPayments.js"></script>
+    <script src="../../payments/utils/waitForPaymentsInit.js"></script>
 
     <!-- E2E Encryption Module -->
     <script src="../../encryption/config/encryptionConfigBase.js"></script>

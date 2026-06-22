@@ -19,6 +19,7 @@ export default defineConfig({
         main: 'index.html',
         auth: 'auth/views/auth.html',
         messenger: 'messaging/views/messenger.html',
+        subscription: 'payments/views/subscription.html',
       },
     },
   },

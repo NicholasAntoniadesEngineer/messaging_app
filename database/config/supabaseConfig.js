@@ -3,30 +3,29 @@
  * Centralized configuration for the Supabase client.
  *
  * ============================================================================
- * SETUP REQUIRED — point this at YOUR OWN Supabase project
+ * SHARED BACKEND — Secure Messenger is a SECOND front-end on the SAME Supabase
+ * project as the companion Money Tracker app.
  * ============================================================================
- * Secure Messenger is a standalone app and MUST use its own dedicated Supabase
- * project (do not reuse another app's project).
+ * Same project URL + publishable/anon key => same Auth (users log in with the
+ * SAME credentials) and the same Postgres database, Storage, Realtime and edge
+ * functions. No separate Supabase setup is required: the messaging/encryption
+ * tables, the subscription tables + trial trigger, the `message-attachments`
+ * storage bucket, and the `user-lookup` edge function already exist there.
  *
- *   1. Create a new project at https://supabase.com
- *   2. Settings -> API: copy the Project URL and the publishable/anon API key
- *   3. Replace the two placeholder values below
- *   4. Run database/setup/messaging-schema.sql in the SQL editor
- *   5. Create a private Storage bucket named "message-attachments" (1MB limit)
- *   6. Deploy the user-lookup edge function (database/supabaseEdgeFunctions/)
- *   7. Auth -> URL Configuration: set the Site URL + redirect URLs
+ * The SQL files in database/setup/ are REFERENCE schemas for a hypothetical
+ * standalone deployment; they are NOT needed for this shared-backend setup.
  *
  * The anon/publishable key is safe to ship client-side — row-level security
- * (RLS) in messaging-schema.sql is what actually protects the data.
+ * (RLS) is what actually protects the data.
  *
  * NOTE: Global logging configuration lives in shared/config/loggingConfig.js;
  * load loggingConfig.js BEFORE this file to control console logging.
  */
 
 const SupabaseConfig = {
-    // TODO: replace with your own Supabase project URL and publishable/anon key
-    PROJECT_URL: 'https://YOUR_PROJECT_REF.supabase.co',
-    PUBLISHABLE_API_KEY: 'YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY',
+    // Shared backend (same project as Money Tracker) — same users, same data.
+    PROJECT_URL: 'https://ofutzrxfbrgtbkyafndv.supabase.co',
+    PUBLISHABLE_API_KEY: 'sb_publishable_yUPqP6PRjtgphcvS0--vgw_Zy3S_Urd',
     _clientInstance: null,
     
     /**

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Content-Security-Policy (SM-19) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <title>Subscription - Secure Messenger</title>
+    <link rel="stylesheet" href="../../shared/vendor/font-awesome/css/all.min.css">
+    <link rel="stylesheet" href="../../shared/styles/main-compiled.css">
+    <script src="../../shared/vendor/supabase/supabase.min.js"></script>
+    <script src="https://js.stripe.com/v3/"></script>
+    <script>
+        (function() {
+            var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
+            var s = localStorage.getItem('secure_messenger_fontScale') || 'medium';
+            document.documentElement.style.fontSize = (m[s] || 16) + 'px';
+        })();
+    </script>
+</head>
+<body>
+    <!-- Header will be injected by Header.js -->
+
+    <main class="subscription-main page-container" role="main">
+        <div class="hero-section">
+            <h1 class="hero-title">Subscription Management</h1>
+        </div>
+
+        <section class="form-section">
+            <div class="subscription-header">
+                <div class="subscription-header-content">
+                    <div class="subscription-header-actions">
+                        <button id="update-payment-button" class="btn btn-secondary">
+                            <i class="fas fa-credit-card"></i> Update Payment
+                        </button>
+                        <button id="view-invoices-button" class="btn btn-secondary">
+                            <i class="fas fa-file-invoice"></i> View Invoices
+                        </button>
+                    </div>
+
+                    <div id="recent-invoices-section" class="recent-invoices-section" style="display: none;">
+                        <h3><i class="fas fa-receipt"></i> Recent Invoices</h3>
+                        <div id="recent-invoices-content">
+                            <p class="loading-text">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="current-subscription-details" class="current-subscription-box" style="display: none;">
+                    <h2><i class="fas fa-crown"></i> Current Subscription</h2>
+                    <div id="current-subscription-content" class="subscription-detail-grid">
+                        <!-- Subscription details will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <div id="plans-container" class="plans-grid">
+                <!-- Plans will be loaded here -->
+            </div>
+
+            <div id="loading-message" class="loading-text" style="text-align: center; padding: var(--space-8);">
+                <i class="fas fa-spinner fa-spin"></i> Loading subscription plans...
+            </div>
+
+            <div id="error-message" style="display: none; text-align: center; padding: var(--space-8); color: var(--color-danger);">
+                <i class="fas fa-exclamation-triangle"></i> Failed to load subscription plans. Please try again later.
+            </div>
+        </section>
+    </main>
+    
+    <!-- Invoice Modal -->
+    <div id="invoice-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-file-invoice"></i> Payment Invoices</h2>
+                <button class="modal-close" id="invoice-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div id="invoice-modal-body">
+                <p class="loading-text"><i class="fas fa-spinner fa-spin"></i> Loading invoices...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="../../shared/vendor/supabase/supabase.min.js"></script>
+
+    <!-- Global Logging Configuration - MUST load first -->
+    <script src="../../shared/config/loggingConfig.js"></script>
+
+    <script src="../../database/config/supabaseConfig.js"></script>
+    <script src="../../shared/services/authService.js"></script>
+    
+    <!-- Database Module Configuration -->
+    <script src="../../database/config/databaseConfigBase.js"></script>
+    <script src="../../database/config/moneyTrackerDatabaseConfig.js"></script>
+    <script src="../../database/utils/databaseConfigHelper.js"></script>
+    <script src="../../database/databaseModule.js"></script>
+
+    <!-- Core Utilities -->
+    <script src="../../shared/config/moduleRegistry.js"></script>
+    <script src="../../shared/config/constants.js"></script>
+    <script src="../../shared/utils/logger.js"></script>
+    <script src="../../shared/utils/errorHandler.js"></script>
+    <script src="../../shared/utils/validators.js"></script>
+    
+    <!-- Database Service -->
+    <script src="../../database/services/databaseService.js"></script>
+    
+    <!-- Initialize Database Module -->
+    <script src="../../database/initDatabase.js"></script>
+    
+    <!-- Payments Module Configuration -->
+    <script src="../config/paymentsConfigBase.js"></script>
+    <script src="../config/moneyTrackerConfig.js"></script>
+    <script src="../utils/configHelper.js"></script>
+    <script src="../paymentsModule.js"></script>
+
+    <!-- Payments Services -->
+    <script src="../services/stripeService.js"></script>
+    <script src="../services/paymentService.js"></script>
+    <script src="../services/subscriptionService.js"></script>
+
+    <!-- Initialize Payments Module -->
+    <script src="../initPayments.js"></script>
+    <script src="../utils/waitForPaymentsInit.js"></script>
+    <script src="../../shared/utils/subscriptionGuard.js"></script>
+    <script src="../../shared/utils/permissionService.js"></script>
+    <script src="../../shared/utils/authGuard.js"></script>
+    <script src="../../shared/utils/networkUtils.js"></script>
+    <script src="../../shared/utils/offlineHandler.js"></script>
+    <script src="../../shared/header/header.js"></script>
+    <script src="../../payments/controllers/upgradeController.js?v=2.0.0-session-wait-20251225"></script>
+    
+    <script>
+        // Verify all required services are loaded
+        console.log('[subscription.html] Checking required services after script load...');
+        console.log('[subscription.html] Services check:', {
+            hasSupabaseConfig: !!window.SupabaseConfig,
+            hasAuthService: !!window.AuthService,
+            hasDatabaseService: !!window.DatabaseService,
+            hasSubscriptionService: !!window.SubscriptionService,
+            hasStripeService: !!window.StripeService,
+            hasStripeConfig: !!window.StripeConfig,
+            hasHeader: !!window.Header,
+            hasUpgradeController: !!window.UpgradeController
+        });
+        
+        // Check for script loading errors
+        window.addEventListener('error', function(e) {
+            console.log('[subscription.html] Global error event:', {
+                message: e.message,
+                filename: e.filename,
+                lineno: e.lineno,
+                colno: e.colno,
+                error: e.error,
+                isStripeService: e.filename && e.filename.includes('StripeService')
+            });
+            if (e.filename && e.filename.includes('StripeService')) {
+                console.error('[subscription.html] ⚠️ StripeService script loading error detected:', {
+                    message: e.message,
+                    filename: e.filename,
+                    lineno: e.lineno,
+                    colno: e.colno,
+                    error: e.error
+                });
+            }
+        }, true);
+        
+        // Check for resource loading errors (network errors)
+        window.addEventListener('error', function(e) {
+            const target = e.target;
+            if (target && target.tagName === 'SCRIPT' && target.src && target.src.includes('StripeService')) {
+                console.error('[subscription.html] ⚠️ StripeService script resource loading error:', {
+                    src: target.src,
+                    error: e.error,
+                    type: target.type
+                });
+            }
+        }, true);
+        
+        // Verify script tags after a delay
+        setTimeout(function() {
+            const stripeServiceScript = document.querySelector('script[src*="StripeService"]');
+            if (stripeServiceScript) {
+                console.log('[subscription.html] StripeService script tag found:', {
+                    src: stripeServiceScript.src,
+                    async: stripeServiceScript.async,
+                    defer: stripeServiceScript.defer,
+                    type: stripeServiceScript.type
+                });
+                
+                // Try to manually check if script loaded
+                stripeServiceScript.addEventListener('load', function() {
+                    console.log('[subscription.html] ✅ StripeService script load event fired');
+                    console.log('[subscription.html] StripeService available after load event:', !!window.StripeService);
+                });
+                
+                stripeServiceScript.addEventListener('error', function(e) {
+                    console.error('[subscription.html] ❌ StripeService script error event fired:', e);
+                });
+            } else {
+                console.error('[subscription.html] ❌ StripeService script tag not found in DOM');
+            }
+        }, 100);
+        
+        // Initialize header
+        if (window.Header) {
+            window.Header.init();
+        } else {
+            console.warn('[subscription.html] Header not available');
+        }
+        
+        // Initialize upgrade page (async to wait for payments init)
+        (async function() {
+            // Wait for payments module initialization before initializing UpgradeController
+            if (window.waitForPaymentsInit) {
+                try {
+                    await window.waitForPaymentsInit();
+                } catch (error) {
+                    console.error('[subscription.html] Error waiting for payments init:', error);
+                }
+            }
+            
+            if (window.UpgradeController) {
+                window.UpgradeController.init();
+            } else {
+                console.warn('[subscription.html] UpgradeController not available');
+            }
+        })();
+        
+        // Final check after a short delay
+        setTimeout(function() {
+            console.log('[subscription.html] Final services check after delay:', {
+                hasStripeService: !!window.StripeService,
+                stripeServiceType: typeof window.StripeService,
+                hasListInvoices: !!(window.StripeService && typeof window.StripeService.listInvoices === 'function')
+            });
+            
+            // If StripeService still not available, try to manually verify the script URL
+            if (!window.StripeService) {
+                console.warn('[subscription.html] ⚠️ StripeService still not available after delay');
+                const stripeServiceScript = document.querySelector('script[src*="StripeService"]');
+                if (stripeServiceScript) {
+                    const scriptUrl = stripeServiceScript.src;
+                    console.log('[subscription.html] Attempting to manually verify script URL:', scriptUrl);
+                    
+                    // Try to fetch the script to see if it's accessible
+                    fetch(scriptUrl)
+                        .then(response => {
+                            console.log('[subscription.html] Script fetch response:', {
+                                status: response.status,
+                                statusText: response.statusText,
+                                ok: response.ok,
+                                contentType: response.headers.get('content-type')
+                            });
+                            if (!response.ok) {
+                                console.error('[subscription.html] ❌ Script URL returned error status:', response.status);
+                            }
+                            return response.text();
+                        })
+                        .then(text => {
+                            console.log('[subscription.html] Script content preview (first 200 chars):', text.substring(0, 200));
+                            console.log('[subscription.html] Script contains StripeService definition:', text.includes('const StripeService'));
+                            console.log('[subscription.html] Script contains window.StripeService:', text.includes('window.StripeService'));
+                        })
+                        .catch(error => {
+                            console.error('[subscription.html] ❌ Error fetching script:', error);
+                        });
+                }
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
+

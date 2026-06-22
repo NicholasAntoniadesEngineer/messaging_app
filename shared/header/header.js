@@ -145,6 +145,10 @@ class Header {
                             <span>${userEmail}</span>
                             <span class="notification-count-badge" id="header-notification-count" style="display: none;">0</span>
                         </div>
+                        <a href="${this.getModulePath('payments')}subscription.html" class="user-dropdown-item user-dropdown-subscription">
+                            <i class="fa-solid fa-crown user-dropdown-icon"></i>
+                            <span>Subscription</span>
+                        </a>
                         <button class="user-dropdown-item user-dropdown-signout" id="header-signout-button" aria-label="Sign out">
                             <i class="fa-solid fa-right-from-bracket user-dropdown-icon"></i>
                             <span>Sign Out</span>

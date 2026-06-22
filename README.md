@@ -37,29 +37,26 @@ shared/          Auth service/guard, header, logging, validators, small utilitie
 - **Crypto primitives**: TweetNaCl (`nacl`/`nacl-util`) + the Web Crypto API
   (HKDF, PBKDF2, AES-GCM for backups).
 
-## Prerequisites
+## Backend: shared with Money Tracker
 
-- A **dedicated** Supabase project (do not share one with another app).
-- Node 20+ (for the Vite dev server / build).
+Secure Messenger is a **second front-end on the same Supabase backend** as the companion
+Money Tracker app — **same project, same Auth (log in with the same credentials), same
+database, Storage, Realtime and edge functions.** It is "just a second tool" over the
+same data.
 
-## Setup
+Because the backend already exists, **there is no Supabase setup to do**: the
+messaging/encryption tables, the subscription tables + 30-day-trial trigger, the
+`message-attachments` Storage bucket, and the `user-lookup` edge function are already
+provisioned. The project URL + publishable key are wired in
+[`database/config/supabaseConfig.js`](database/config/supabaseConfig.js); the Stripe
+hooks are in [`payments/config/moneyTrackerConfig.js`](payments/config/moneyTrackerConfig.js).
 
-1. **Create a Supabase project** at <https://supabase.com>.
-2. **Configure the client**: edit [`database/config/supabaseConfig.js`](database/config/supabaseConfig.js)
-   and set `PROJECT_URL` and `PUBLISHABLE_API_KEY` (Settings → API). The
-   publishable/anon key is meant to be public; row-level security protects the data.
-3. **Create the Storage bucket** (must exist *before* running the SQL): a **private**
-   bucket named `message-attachments` with a 1&nbsp;MB file-size limit
-   (see [`database/setup/supabase-storage-setup.md`](database/setup/supabase-storage-setup.md)).
-4. **Apply the schema**: run [`database/setup/messaging-schema.sql`](database/setup/messaging-schema.sql)
-   in the Supabase SQL editor. It creates all messaging + encryption tables with
-   row-level security, the realtime publication, and storage policies.
-5. **Deploy the edge function**: `user-lookup`
-   (in [`database/supabaseEdgeFunctions/`](database/supabaseEdgeFunctions/)). It resolves
-   email ↔ user-id (there is no `profiles` table; identity is `auth.users`).
-6. **Configure Auth**: in the dashboard, set the Site URL and add the deployed app URL
-   plus `…/auth/views/auth.html` to the redirect allow-list (sign-up confirmation and
-   password-reset links depend on this). Configure SMTP / email confirmation as desired.
+The SQL in [`database/setup/`](database/setup/) (`messaging-schema.sql`,
+`subscription-schema.sql`) is **reference only** — the extracted, security-hardened
+schema for a hypothetical *standalone* deployment. It is **not** applied to the shared
+backend. See "Server-side hardening" below.
+
+- Node 20+ is only needed for the Vite dev server / build.
 
 ## Run
 
@@ -82,16 +79,30 @@ and publishes. A push to `main` deploys.
 - Authenticity/MITM, forward secrecy, at-rest key storage, CDN integrity, and logging
   are areas being actively hardened — see [`SECURITY.md`](SECURITY.md).
 
-## Independence notes (decoupled from the origin project)
+### Client-side vs server-side hardening (important)
 
-This app was extracted from a larger "money tracker" application. The following were
-removed/neutralised so it runs standalone:
+The security review ([`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md)) produced fixes
+in two categories:
 
-- Stripe **payments** and **subscription gating** — messaging is ungated.
-- The in-chat **budget "Share Data"** feature (sharing months/pots/settings).
-- Money-tracker pages and unused shared modules; the schema was reduced to
-  messaging/encryption tables only.
+- **Client-side fixes — LIVE in this app:** output escaping (XSS), removal of plaintext
+  message previews, secret-material logging stripped, verbose logging off by default,
+  self-hosted crypto libraries (no third-party CDN), a Content-Security-Policy, an
+  enforced authentication gate, message-size and self-message guards, and the insecure
+  device-pairing path disabled.
+- **Server-side fixes — NOT yet live on the shared backend:** the RLS tightening
+  (attachment storage scoping, blocked-sender insert prevention, immutable attachments,
+  world-readable key tables) and the `user-lookup` edge-function authz live in the
+  *reference* schema/edge files here, but the shared Money Tracker backend still runs its
+  original policies. To activate them, a migration must be applied to the shared
+  project — **which also affects Money Tracker.** This is a deliberate, separate step.
+
+## Relationship to Money Tracker
+
+This app was extracted from the Money Tracker application and shares its backend. It was
+slimmed to messaging concerns: the Money Tracker pages and unused shared modules were
+removed, and the in-chat **budget "Share Data"** feature (months/pots/settings) was
+removed from the UI. Stripe **subscriptions are retained** (same backend), with messaging
+and attachments as Premium features and a 30-day trial on signup.
 
 Residual internal naming (`moneyTracker*` config file/global names, the
-`MoneyTrackerEncryption` IndexedDB name) is cosmetic and tracked for cleanup; it does
-not affect functionality or independence.
+`MoneyTrackerEncryption` IndexedDB name) is cosmetic and shared with the origin project.
