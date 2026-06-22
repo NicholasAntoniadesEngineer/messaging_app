@@ -403,11 +403,14 @@ const AttachmentService = {
             const ciphertext = encryptedData.slice(24);
             const decryptedData = this._decryptFile(ciphertext, nonce, fileKey);
 
-            // Update download count
-            await client
-                .from('message_attachments')
-                .update({ downloaded_count: attachment.downloaded_count + 1 })
-                .eq('id', attachmentId);
+            // Update download count via SECURITY DEFINER RPC. The message_attachments
+            // table is immutable under the hardened RLS (no UPDATE policy), so the only
+            // permitted mutation is this counter bump. Best-effort: never block a download.
+            try {
+                await client.rpc('increment_attachment_download_count', { p_attachment_id: attachmentId });
+            } catch (e) {
+                console.warn('[AttachmentService] download-count bump skipped:', e?.message);
+            }
 
             console.log('[AttachmentService] ✓ Downloaded:', attachment.file_name);
 
