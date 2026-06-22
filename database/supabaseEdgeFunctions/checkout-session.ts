@@ -77,10 +77,13 @@ serve(async (req) => {
       throw new Error("successUrl and cancelUrl are required")
     }
 
-    // Get user's subscription
+    // Get user's subscription.
+    // NOTE: do NOT embed subscription_plans here — subscriptions has TWO FKs to
+    // subscription_plans (plan_id and pending_plan_id), so the auto-embed is ambiguous
+    // ("more than one relationship was found"). The plan is fetched separately below.
     const { data: subscription, error: subError } = await supabase
       .from("subscriptions")
-      .select("*, subscription_plans(*)")
+      .select("*")
       .eq("user_id", user.id)
       .single()
 
