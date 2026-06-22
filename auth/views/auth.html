@@ -655,7 +655,7 @@
                     window.location.href = '../../messaging/views/messenger.html';
                 } catch (restoreError) {
                     console.log('[Auth] Password restore failed:', restoreError.message);
-                    if (restoreError.message && restoreError.message.includes('No password backup found')) {
+                    if (restoreError.message && restoreError.message.includes('No backup found')) {
                         console.log('[Auth] No backup exists - new user, setting up encryption');
                         await setupDeviceEncryption(userId);
                     } else {
