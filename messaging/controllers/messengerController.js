@@ -5,6 +5,8 @@
 
 const MessengerController = {
     currentConversationId: null,
+    // Maximum allowed plaintext message length (client-side guard, SM-22)
+    MAX_MESSAGE_LENGTH: 16384,
     // Performance optimizations
     emailCache: new Map(), // Cache user emails to avoid repeated lookups
     enableVerboseLogging: false, // Set to true for debugging
@@ -395,7 +397,7 @@ const MessengerController = {
                 console.error('[MessengerController] Error loading conversations:', error);
                 const list = document.getElementById('conversations-list');
                 if (list) {
-                    list.innerHTML = `<p style="color: var(--danger-color);">Error loading conversations: ${error.message}</p>`;
+                    list.innerHTML = `<p style="color: var(--danger-color);">Error loading conversations: ${this._escapeHtml(error.message)}</p>`;
                 }
             } finally {
                 this.isLoadingConversations = false;
@@ -438,9 +440,9 @@ const MessengerController = {
 
             return `
                 <div class="conversation-card${unreadClass}" data-conversation-id="${conv.id}">
-                    <div class="conversation-avatar">${initials}</div>
+                    <div class="conversation-avatar">${this._escapeHtml(initials)}</div>
                     <div class="conversation-info">
-                        <div class="conversation-name">${conv.other_user_email}${unreadBadge}</div>
+                        <div class="conversation-name">${this._escapeHtml(conv.other_user_email)}${unreadBadge}</div>
                         ${conv.last_message_preview ? '<div class="conversation-preview">New message available</div>' : ''}
                     </div>
                     <div class="conversation-time">${lastMessageDate}</div>
@@ -611,7 +613,6 @@ const MessengerController = {
 
             if (result.success) {
                 const messages = result.messages || [];
-                console.log('[MessengerController] Messages loaded:', messages.length);
 
                 // Fetch attachments for all messages in parallel
                 if (window.AttachmentService) {
@@ -683,7 +684,7 @@ const MessengerController = {
             console.error('[MessengerController] Error opening conversation:', error);
             const messageThread = document.getElementById('message-thread');
             if (messageThread) {
-                messageThread.innerHTML = `<p style="color: var(--danger-color);">Error loading messages: ${error.message}</p>`;
+                messageThread.innerHTML = `<p style="color: var(--danger-color);">Error loading messages: ${this._escapeHtml(error.message)}</p>`;
             }
         } finally {
             // Clear opening guard
@@ -937,8 +938,8 @@ const MessengerController = {
                     <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
                         <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
                         <div style="flex: 1; min-width: 0;">
-                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${fileName}</div>
-                            <div style="font-size: 0.75em; opacity: 0.7;">${fileSize}</div>
+                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
+                            <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
                         </div>
                         <i class="fas fa-download" style="opacity: 0.6;"></i>
                     </div>
@@ -998,8 +999,8 @@ const MessengerController = {
                 <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
                     <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
                     <div style="flex: 1; min-width: 0;">
-                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${fileName}</div>
-                        <div style="font-size: 0.75em; opacity: 0.7;">${fileSize}</div>
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
+                        <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
                     </div>
                     <i class="fas fa-download" style="opacity: 0.6;"></i>
                 </div>
@@ -1115,8 +1116,8 @@ const MessengerController = {
                         <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
                             <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
                             <div style="flex: 1; min-width: 0;">
-                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${fileName}</div>
-                                <div style="font-size: 0.75em; opacity: 0.7;">${fileSize}</div>
+                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
+                                <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
                             </div>
                             <i class="fas fa-download" style="opacity: 0.6;"></i>
                         </div>
@@ -1125,32 +1126,12 @@ const MessengerController = {
                 attachmentsHtml = `<div class="message-attachments">${attachmentItems}</div>`;
             }
 
-            // Build debug info HTML if debug mode is enabled
-            let debugInfoHtml = '';
-            if (window.ENCRYPTION_DEBUG_MODE && msg._debugInfo) {
-                const debug = msg._debugInfo;
-                const statusColor = debug.decryptSuccess ? '#4CAF50' : '#F44336';
-                const statusIcon = debug.decryptSuccess ? '✓' : '✗';
-                debugInfoHtml = `
-                    <div class="message-debug-info" style="font-size: 0.7rem; margin-top: var(--spacing-sm); padding: var(--spacing-xs); background: rgba(0,0,0,0.15); border-radius: 4px; font-family: monospace;">
-                        <div style="color: ${statusColor}; font-weight: bold;">${statusIcon} Decryption: ${debug.decryptSuccess ? 'Success' : 'Failed'}</div>
-                        ${debug.decryptError ? `<div style="color: #F44336;">Error: ${debug.decryptError}</div>` : ''}
-                        <div>Epoch: ${debug.epoch}</div>
-                        <div>Counter: ${debug.counter !== undefined ? debug.counter : 'N/A'}</div>
-                        <div>Message ID: ${debug.messageId}</div>
-                        <div>Ciphertext: ${debug.ciphertextLength} chars</div>
-                        <div>Nonce: ${debug.nonceLength} chars</div>
-                    </div>
-                `;
-            }
-
             return `
                 <div class="message-item ${isOwnMessage ? 'own-message' : ''}">
-                    <div class="message-sender">${senderEmail}</div>
-                    <div class="message-content">${msg.content}</div>
+                    <div class="message-sender">${this._escapeHtml(senderEmail)}</div>
+                    <div class="message-content">${this._escapeHtml(msg.content)}</div>
                     ${attachmentsHtml}
                     <div class="message-timestamp">${dateString}</div>
-                    ${debugInfoHtml}
                 </div>
             `;
         });
@@ -1282,6 +1263,12 @@ const MessengerController = {
         const hasAttachment = !!this._selectedAttachment;
 
         if (!content && !hasAttachment) {
+            return;
+        }
+
+        // Guard: enforce a maximum message length (SM-22)
+        if (content.length > this.MAX_MESSAGE_LENGTH) {
+            alert(`Message is too long. Please keep it under ${this.MAX_MESSAGE_LENGTH} characters.`);
             return;
         }
 
@@ -1467,26 +1454,6 @@ const MessengerController = {
             const date = new Date(message.created_at);
             const dateString = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-            // Build debug info HTML if debug mode is enabled
-            let debugInfoHtml = '';
-            if (window.ENCRYPTION_DEBUG_MODE && message._debugInfo) {
-                const debug = message._debugInfo;
-                const statusColor = debug.decryptSuccess ? '#4CAF50' : '#F44336';
-                const statusIcon = debug.decryptSuccess ? '✓' : '✗';
-                const typeLabel = debug.isSentMessage ? ' (Sent)' : '';
-                debugInfoHtml = `
-                    <div class="message-debug-info" style="font-size: 0.7rem; margin-top: var(--spacing-sm); padding: var(--spacing-xs); background: rgba(0,0,0,0.15); border-radius: 4px; font-family: monospace;">
-                        <div style="color: ${statusColor}; font-weight: bold;">${statusIcon} Encryption${typeLabel}: ${debug.decryptSuccess ? 'Success' : 'Failed'}</div>
-                        ${debug.decryptError ? `<div style="color: #F44336;">Error: ${debug.decryptError}</div>` : ''}
-                        <div>Epoch: ${debug.epoch}</div>
-                        <div>Counter: ${debug.counter !== undefined ? debug.counter : 'N/A'}</div>
-                        <div>Message ID: ${debug.messageId}</div>
-                        <div>Ciphertext: ${debug.ciphertextLength} chars</div>
-                        <div>Nonce: ${debug.nonceLength} chars</div>
-                    </div>
-                `;
-            }
-
             // Build attachment HTML if attachments exist
             let attachmentsHtml = '';
             const attachments = message.attachments || [];
@@ -1500,8 +1467,8 @@ const MessengerController = {
                         <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
                             <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
                             <div style="flex: 1; min-width: 0;">
-                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${fileName}</div>
-                                <div style="font-size: 0.75em; opacity: 0.7;">${fileSize}</div>
+                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
+                                <div style="font-size: 0.75em; opacity: 0.7;">${this._escapeHtml(fileSize)}</div>
                             </div>
                             <i class="fas fa-download" style="opacity: 0.6;"></i>
                         </div>
@@ -1513,11 +1480,10 @@ const MessengerController = {
             // Generate HTML for the new message (regular message only, not share requests)
             const messageHtml = `
                 <div class="message-item ${isOwnMessage ? 'own-message' : ''}">
-                    <div class="message-sender">${senderEmail}</div>
-                    <div class="message-content">${message.content}</div>
+                    <div class="message-sender">${this._escapeHtml(senderEmail)}</div>
+                    <div class="message-content">${this._escapeHtml(message.content)}</div>
                     ${attachmentsHtml}
                     <div class="message-timestamp">${dateString}</div>
-                    ${debugInfoHtml}
                 </div>
             `;
 
@@ -1587,6 +1553,21 @@ const MessengerController = {
         if (!messageContent) {
             alert('Please enter a message');
             messageContentInput.focus();
+            return;
+        }
+
+        // Guard: enforce a maximum message length (SM-22)
+        if (messageContent.length > this.MAX_MESSAGE_LENGTH) {
+            alert(`Message is too long. Please keep it under ${this.MAX_MESSAGE_LENGTH} characters.`);
+            messageContentInput.focus();
+            return;
+        }
+
+        // Guard: prevent self-messaging (SM-41)
+        const currentUserEmail = window.AuthService?.getCurrentUser?.()?.email;
+        if (currentUserEmail && recipientEmail.toLowerCase() === currentUserEmail.toLowerCase()) {
+            alert('You cannot send a message to yourself. Please enter a different recipient.');
+            recipientEmailInput.focus();
             return;
         }
 

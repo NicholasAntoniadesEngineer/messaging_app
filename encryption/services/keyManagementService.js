@@ -742,31 +742,18 @@ const KeyManagementService = {
         if (!theirPublicKeyB64) {
             throw new Error(`Other user (${otherUserId.substring(0, 8)}...) has no public key - they may not have set up encryption yet`);
         }
-        console.log(`[KeyManagementService] establishSession: Their public key (FULL): ${theirPublicKeyB64}`);
 
         // Get our keys
         const ourKeys = await KeyStorageService.getIdentityKeys(this.currentUserId);
         if (!ourKeys) {
             throw new Error('No local identity keys - run device pairing first');
         }
-        const ourSecretKeyB64 = CryptoPrimitivesService.serializeKey(ourKeys.secretKey);
-        const ourPublicKeyB64 = CryptoPrimitivesService.serializeKey(ourKeys.publicKey);
-        console.log(`[KeyManagementService] establishSession: Our public key (FULL): ${ourPublicKeyB64}`);
-        console.log(`[KeyManagementService] establishSession: Our secret key prefix: ${ourSecretKeyB64.substring(0, 12)}...`);
-
         // ECDH key agreement
         const theirPublicKey = CryptoPrimitivesService.deserializeKey(theirPublicKeyB64);
-        console.log(`[KeyManagementService] establishSession: Computing ECDH shared secret...`);
         const sharedSecret = CryptoPrimitivesService.deriveSharedSecret(ourKeys.secretKey, theirPublicKey);
-
-        // Log more bytes of shared secret for debugging (safe to log - derived, not the keys)
-        const sharedSecretPreview = Array.from(sharedSecret.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
-        console.log(`[KeyManagementService] establishSession: Shared secret (8 bytes): ${sharedSecretPreview}`);
 
         // Derive session key (always epoch 0)
         const sessionKey = await KeyDerivationService.deriveSessionKey(sharedSecret, epoch);
-        const sessionKeyPreview = Array.from(sessionKey.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
-        console.log(`[KeyManagementService] establishSession: Session key (8 bytes): ${sessionKeyPreview}`);
 
         // Store locally
         await KeyStorageService.storeSessionKey(conversationId, epoch, sessionKey, 0);
@@ -825,19 +812,12 @@ const KeyManagementService = {
             throw new Error('Message counter overflow');
         }
 
-        // Log session key being used for encryption
-        const sessionKeyPreview = Array.from(session.sessionKey.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
-        console.log(`[KeyManagementService] encryptMessage: Using session key (8 bytes): ${sessionKeyPreview}`);
-        console.log(`[KeyManagementService] encryptMessage: Deriving message key for epoch=${epoch}, counter=${session.counter}...`);
-
         // Derive message-specific key
         const messageKey = await KeyDerivationService.deriveMessageKey(
             session.sessionKey,
             epoch,
             session.counter
         );
-        const messageKeyPreview = Array.from(messageKey.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
-        console.log(`[KeyManagementService] encryptMessage: Message key (8 bytes): ${messageKeyPreview}`);
 
         // Encrypt
         const encrypted = CryptoPrimitivesService.encrypt(plaintext, messageKey);

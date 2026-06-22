@@ -51,10 +51,10 @@ const EncryptionConfigBase = {
      */
     crypto: {
         /**
-         * TweetNaCl.js CDN URLs
+         * TweetNaCl.js — self-hosted (SM-11), no third-party CDN. Paths are relative to the page.
          */
-        naclUrl: 'https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js',
-        naclUtilUrl: 'https://cdn.jsdelivr.net/npm/tweetnacl-util@0.15.1/nacl-util.min.js',
+        naclUrl: '../../shared/vendor/crypto/nacl-fast.min.js',
+        naclUtilUrl: '../../shared/vendor/crypto/nacl-util.min.js',
 
         /**
          * Load timeout in milliseconds

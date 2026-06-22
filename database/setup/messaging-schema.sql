@@ -50,6 +50,8 @@ DO $$ BEGIN RAISE NOTICE '[1/9] Dropping existing tables, functions, and policie
 DROP TABLE IF EXISTS message_attachments CASCADE;
 DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS conversation_session_keys CASCADE;
+-- SM-40: conversation_participants was dead/self-only RLS; dropped. Kept in the
+-- idempotent cleanup so re-running this script removes it from existing databases.
 DROP TABLE IF EXISTS conversation_participants CASCADE;
 DROP TABLE IF EXISTS conversations CASCADE;
 DROP TABLE IF EXISTS device_keys CASCADE;
@@ -68,8 +70,12 @@ DROP FUNCTION IF EXISTS update_messages_updated_at() CASCADE;
 DROP FUNCTION IF EXISTS cleanup_expired_attachments() CASCADE;
 DROP FUNCTION IF EXISTS update_session_keys_updated_at() CASCADE;
 DROP FUNCTION IF EXISTS update_key_backups_updated_at() CASCADE;
+-- SM-15: SECURITY DEFINER helper for server-side block enforcement
+DROP FUNCTION IF EXISTS is_blocked(UUID, UUID) CASCADE;
+-- SM-30: SECURITY DEFINER helper for download-count increment
+DROP FUNCTION IF EXISTS increment_attachment_download_count(BIGINT) CASCADE;
 
--- Drop storage policies
+-- Drop storage policies (SM-05: re-scoped below to conversation participants / uploader)
 DROP POLICY IF EXISTS "Users can upload attachments" ON storage.objects;
 DROP POLICY IF EXISTS "Users can read attachments" ON storage.objects;
 DROP POLICY IF EXISTS "Users can delete attachments" ON storage.objects;
@@ -103,8 +109,14 @@ CREATE POLICY friends_select_involved ON friends
 CREATE POLICY friends_insert_own ON friends
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+-- SM-39: only the request recipient may act on a pending request, and the row may
+-- only be transitioned to 'accepted' or 'blocked'. WITH CHECK validates the NEW row
+-- so the recipient cannot flip the row to an unauthorized state (e.g. reassign
+-- friend_user_id away from themselves or set a value outside this set).
 CREATE POLICY friends_update_as_friend ON friends
-    FOR UPDATE USING (auth.uid() = friend_user_id AND status = 'pending');
+    FOR UPDATE
+    USING (auth.uid() = friend_user_id AND status = 'pending')
+    WITH CHECK (auth.uid() = friend_user_id AND status IN ('accepted', 'blocked'));
 
 CREATE POLICY friends_delete_involved ON friends
     FOR DELETE USING (auth.uid() = user_id OR auth.uid() = friend_user_id);
@@ -148,6 +160,27 @@ CREATE POLICY blocked_users_delete_own ON blocked_users
 GRANT SELECT, INSERT, DELETE ON blocked_users TO authenticated;
 GRANT USAGE, SELECT ON SEQUENCE blocked_users_id_seq TO authenticated;
 
+-- SM-15: server-side block enforcement helper.
+-- blocked_users_select_own deliberately hides a user's block rows from everyone
+-- but the owner, so a plain subquery inside another user's INSERT policy cannot
+-- read them. This SECURITY DEFINER function answers "has p_owner blocked p_blocked?"
+-- regardless of the caller, without exposing the block list itself.
+CREATE OR REPLACE FUNCTION is_blocked(p_owner UUID, p_blocked UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM blocked_users
+        WHERE user_id = p_owner
+          AND blocked_user_id = p_blocked
+    );
+$$;
+
+GRANT EXECUTE ON FUNCTION is_blocked(UUID, UUID) TO authenticated;
+
 DO $$ BEGIN RAISE NOTICE '[4/9] Creating E2E encryption system (identity_keys, public_key_history, devices)...'; END $$;
 
 -- ============================================================
@@ -187,8 +220,12 @@ CREATE INDEX idx_identity_keys_user_id ON identity_keys(user_id);
 
 ALTER TABLE identity_keys ENABLE ROW LEVEL SECURITY;
 
+-- SM-14: restrict SELECT to authenticated users only (no anon/world access).
+-- Public keys must remain readable by every authenticated user for key exchange,
+-- but never by the anon role. (Authenticity/TOFU pinning and routing discovery
+-- through the rate-limited user-lookup edge function are tracked under SM-01/SM-20.)
 CREATE POLICY identity_keys_select_all ON identity_keys
-    FOR SELECT USING (true);
+    FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY identity_keys_insert_own ON identity_keys
     FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -298,6 +335,13 @@ CREATE INDEX idx_device_keys_pairing_code ON device_keys(pairing_code) WHERE pai
 
 ALTER TABLE device_keys ENABLE ROW LEVEL SECURITY;
 
+-- SM-21: device_keys is correctly owner-scoped on every operation below
+-- (auth.uid() = user_id), so no row is ever exposed beyond its owner.
+-- NOTE: the 5-minute `expires_at` is NOT enforced here. The pairing flow that
+-- writes these rows is being disabled separately; if it is ever re-enabled the
+-- SELECT policy MUST also require `expires_at > now()` and a scheduled
+-- `DELETE FROM device_keys WHERE expires_at < now()` must reap stale rows, so an
+-- expired row holding the (weakly wrapped) identity secret cannot linger.
 CREATE POLICY device_keys_select_own ON device_keys
     FOR SELECT USING (auth.uid() = user_id);
 
@@ -371,7 +415,9 @@ CREATE INDEX idx_conversations_updated_at ON conversations(updated_at DESC);
 
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 
--- Note: RLS policy for conversations is created after conversation_participants table
+-- SM-40: the conversations RLS policies (below) reference user1_id/user2_id
+-- directly. The 1:1 model is sufficient, so the dead conversation_participants
+-- table (self-only RLS, never referenced by the app) has been removed.
 
 CREATE OR REPLACE FUNCTION update_conversations_updated_at()
 RETURNS TRIGGER
@@ -392,34 +438,11 @@ CREATE TRIGGER trigger_update_conversations_updated_at
 GRANT SELECT, INSERT ON conversations TO authenticated;
 GRANT USAGE, SELECT ON SEQUENCE conversations_id_seq TO authenticated;
 
--- Conversation participants
-CREATE TABLE IF NOT EXISTS conversation_participants (
-    conversation_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    joined_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (conversation_id, user_id)
-);
+-- SM-40: conversation_participants table + policies removed (dead, self-only RLS).
+-- The table is dropped in the idempotent cleanup section above so re-running this
+-- script removes it from existing databases.
 
-DROP INDEX IF EXISTS idx_conversation_participants_user_id;
-DROP INDEX IF EXISTS idx_conversation_participants_conversation_id;
-CREATE INDEX idx_conversation_participants_user_id ON conversation_participants(user_id);
-CREATE INDEX idx_conversation_participants_conversation_id ON conversation_participants(conversation_id);
-
-ALTER TABLE conversation_participants ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY conversation_participants_select_involved ON conversation_participants
-    FOR SELECT USING (
-        auth.uid() = user_id
-    );
-
-CREATE POLICY conversation_participants_insert_new_conversation ON conversation_participants
-    FOR INSERT WITH CHECK (
-        auth.uid() = user_id
-    );
-
-GRANT SELECT, INSERT ON conversation_participants TO authenticated;
-
--- Now create conversations RLS policies (uses user1_id/user2_id directly)
+-- Conversations RLS policies (use user1_id/user2_id directly)
 CREATE POLICY conversations_select_participant ON conversations
     FOR SELECT USING (
         auth.uid() = user1_id OR auth.uid() = user2_id
@@ -485,6 +508,10 @@ CREATE POLICY messages_select_participant ON messages
         )
     );
 
+-- SM-15: enforce blocking server-side. A sender the recipient has blocked must not
+-- be able to INSERT, even if they bypass the client guard and call PostgREST
+-- directly. is_blocked() is SECURITY DEFINER because blocked_users_select_own hides
+-- the recipient's block rows from the sender's own context.
 CREATE POLICY messages_insert_participant ON messages
     FOR INSERT WITH CHECK (
         auth.uid() = sender_id AND
@@ -492,7 +519,8 @@ CREATE POLICY messages_insert_participant ON messages
             SELECT 1 FROM conversations
             WHERE conversations.id = messages.conversation_id
             AND (conversations.user1_id = auth.uid() OR conversations.user2_id = auth.uid())
-        )
+        ) AND
+        NOT public.is_blocked(messages.recipient_id, auth.uid())
     );
 
 CREATE POLICY messages_update_participant ON messages
@@ -591,22 +619,53 @@ CREATE POLICY attachments_insert_uploader ON message_attachments
         )
     );
 
--- Only uploader can update (for download count, etc.)
-CREATE POLICY attachments_update_participant ON message_attachments
-    FOR UPDATE USING (
-        EXISTS (
-            SELECT 1 FROM conversations
-            WHERE conversations.id = message_attachments.conversation_id
-            AND (conversations.user1_id = auth.uid() OR conversations.user2_id = auth.uid())
-        )
-    );
+-- SM-30: the previous UPDATE policy let ANY conversation participant rewrite ANY
+-- column on ANY attachment row (no WITH CHECK, no column scope) — enabling
+-- cross-user metadata tampering (plant an XSS file_name on the counterparty's row),
+-- object substitution (storage_path/encrypted_file_key), and expiry bypass
+-- (push expires_at far into the future). Attachment metadata is immutable once
+-- created, so there is NO table-level UPDATE policy and the table GRANT below
+-- omits UPDATE. The only legitimate mutation — bumping downloaded_count — is
+-- done through the SECURITY DEFINER function below, which any conversation
+-- participant may call but which can touch no other column.
 
 -- Only uploader can delete
 CREATE POLICY attachments_delete_uploader ON message_attachments
     FOR DELETE USING (auth.uid() = uploader_id);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON message_attachments TO authenticated;
+-- Deliberately NO UPDATE in this grant (SM-30): rows are immutable post-insert.
+GRANT SELECT, INSERT, DELETE ON message_attachments TO authenticated;
 GRANT USAGE, SELECT ON SEQUENCE message_attachments_id_seq TO authenticated;
+
+-- SM-30: controlled, column-scoped download-count increment. Runs as owner so it
+-- can UPDATE despite no UPDATE GRANT/policy, but it only touches downloaded_count
+-- and only for attachments in a conversation the caller participates in. All other
+-- columns (file_name, storage_path, encrypted_file_key, expires_at, ...) stay
+-- immutable after insert.
+CREATE OR REPLACE FUNCTION increment_attachment_download_count(p_attachment_id BIGINT)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    new_count INTEGER;
+BEGIN
+    UPDATE message_attachments AS ma
+    SET downloaded_count = ma.downloaded_count + 1
+    WHERE ma.id = p_attachment_id
+      AND EXISTS (
+          SELECT 1 FROM conversations c
+          WHERE c.id = ma.conversation_id
+            AND (c.user1_id = auth.uid() OR c.user2_id = auth.uid())
+      )
+    RETURNING ma.downloaded_count INTO new_count;
+
+    RETURN new_count; -- NULL if not found / caller not a participant
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION increment_attachment_download_count(BIGINT) TO authenticated;
 
 DO $$ BEGIN RAISE NOTICE '[8/9] Creating storage bucket policies and realtime...'; END $$;
 
@@ -615,27 +674,68 @@ DO $$ BEGIN RAISE NOTICE '[8/9] Creating storage bucket policies and realtime...
 -- ============================================================
 -- These policies control access to the 'message-attachments' storage bucket.
 -- The bucket must be created manually in Supabase Dashboard > Storage.
+--
+-- SM-05: the previous policies gated ONLY on bucket_id, so any authenticated user
+-- could download (SELECT) or delete (DELETE) EVERY object in the bucket, and the
+-- object keys (<conversationId>/<timestamp>-<rand>, conversationId being a
+-- guessable BIGSERIAL) are fully enumerable. The policies below scope access to
+-- the conversation in the object path:
+--   - the upload path is built as `<conversationId>/...` (attachmentService.js),
+--     so the first path segment is the conversation id;
+--   - (storage.foldername(name))[1] extracts that first segment;
+--   - the `~ '^[0-9]+$'` guard ensures a malformed/non-numeric key simply fails
+--     the policy instead of raising a cast error;
+--   - participation is verified against conversations.user1_id/user2_id.
+-- SELECT is limited to conversation participants; INSERT and DELETE are further
+-- limited to the object owner (auth.uid()), i.e. the uploader. Never expose
+-- bucket-root .list() — keep the bucket PRIVATE.
 
--- Allow authenticated users to upload to message-attachments bucket
+-- INSERT: uploader must own the object AND participate in the path's conversation.
 DROP POLICY IF EXISTS "Users can upload attachments" ON storage.objects;
 CREATE POLICY "Users can upload attachments"
 ON storage.objects FOR INSERT
 TO authenticated
-WITH CHECK (bucket_id = 'message-attachments');
+WITH CHECK (
+    bucket_id = 'message-attachments'
+    AND owner = auth.uid()
+    AND (storage.foldername(name))[1] ~ '^[0-9]+$'
+    AND EXISTS (
+        SELECT 1 FROM public.conversations c
+        WHERE c.id = ((storage.foldername(name))[1])::bigint
+          AND (c.user1_id = auth.uid() OR c.user2_id = auth.uid())
+    )
+);
 
--- Allow authenticated users to read from message-attachments bucket
+-- SELECT: any participant of the path's conversation may read its objects.
 DROP POLICY IF EXISTS "Users can read attachments" ON storage.objects;
 CREATE POLICY "Users can read attachments"
 ON storage.objects FOR SELECT
 TO authenticated
-USING (bucket_id = 'message-attachments');
+USING (
+    bucket_id = 'message-attachments'
+    AND (storage.foldername(name))[1] ~ '^[0-9]+$'
+    AND EXISTS (
+        SELECT 1 FROM public.conversations c
+        WHERE c.id = ((storage.foldername(name))[1])::bigint
+          AND (c.user1_id = auth.uid() OR c.user2_id = auth.uid())
+    )
+);
 
--- Allow authenticated users to delete from message-attachments bucket
+-- DELETE: only the uploader (object owner) who is a participant may delete.
 DROP POLICY IF EXISTS "Users can delete attachments" ON storage.objects;
 CREATE POLICY "Users can delete attachments"
 ON storage.objects FOR DELETE
 TO authenticated
-USING (bucket_id = 'message-attachments');
+USING (
+    bucket_id = 'message-attachments'
+    AND owner = auth.uid()
+    AND (storage.foldername(name))[1] ~ '^[0-9]+$'
+    AND EXISTS (
+        SELECT 1 FROM public.conversations c
+        WHERE c.id = ((storage.foldername(name))[1])::bigint
+          AND (c.user1_id = auth.uid() OR c.user2_id = auth.uid())
+    )
+);
 
 -- Function to clean up expired attachments (run via scheduled job)
 CREATE OR REPLACE FUNCTION cleanup_expired_attachments()

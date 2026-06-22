@@ -54,8 +54,8 @@ const CryptoLibraryLoader = {
         }
 
         const config = this._config || {};
-        const naclUrl = config.crypto?.naclUrl || 'https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js';
-        const naclUtilUrl = config.crypto?.naclUtilUrl || 'https://cdn.jsdelivr.net/npm/tweetnacl-util@0.15.1/nacl-util.min.js';
+        const naclUrl = config.crypto?.naclUrl || '../../shared/vendor/crypto/nacl-fast.min.js';
+        const naclUtilUrl = config.crypto?.naclUtilUrl || '../../shared/vendor/crypto/nacl-util.min.js';
         const timeout = config.crypto?.loadTimeout || 15000;
 
         console.log('[CryptoLibraryLoader] Loading TweetNaCl.js from CDN...');

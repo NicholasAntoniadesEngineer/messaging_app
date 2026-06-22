@@ -37,7 +37,7 @@ const MessagingService = {
     },
 
     async getOrCreateConversation(user1Id, user2Id) {
-        console.log('[MessagingService] getOrCreateConversation()', { user1Id, user2Id });
+        // SM-48: do not log participant user ids (social-graph metadata).
         try {
             const db = this._getDatabaseService();
             const [orderedUser1, orderedUser2] = user1Id < user2Id ? [user1Id, user2Id] : [user2Id, user1Id];
@@ -84,7 +84,7 @@ const MessagingService = {
     },
 
     async sendMessage(conversationId, senderId, recipientId, content) {
-        console.log('[MessagingService] sendMessage()', { conversationId, senderId, recipientId, contentLength: content?.length });
+        // SM-48: do not log participant ids or message metadata (social-graph leak).
         try {
             const db = this._getDatabaseService();
 
@@ -147,12 +147,14 @@ const MessagingService = {
                         db.getUserEmailById(recipientId)
                     ]);
 
+                    // SM-03: never send message plaintext (or a derivative) outside the
+                    // encrypted channel. Pass only non-content metadata so the notification
+                    // pipeline renders a generic body (e.g. "You have a new message").
                     await window.NotificationProcessor.createAndDeliver(
                         recipientId, 'message_received', null, senderId, null,
                         {
                             fromUserEmail: fromEmail.success ? fromEmail.email : 'Unknown User',
-                            toUserEmail: toEmail.success ? toEmail.email : 'Unknown User',
-                            messagePreview: content.trim().substring(0, 100)
+                            toUserEmail: toEmail.success ? toEmail.email : 'Unknown User'
                         },
                         conversationId, null, null, null
                     );
@@ -231,7 +233,6 @@ const MessagingService = {
     },
 
     async getMessages(conversationId, options = {}) {
-        console.log('[MessagingService] getMessages()', { conversationId });
         try {
             const db = this._getDatabaseService();
             const table = this._getTableName('messages');
@@ -250,7 +251,6 @@ const MessagingService = {
             }
 
             const messages = result.data || [];
-            console.log(`[MessagingService] Found ${messages.length} messages in conversation ${conversationId}`);
 
             const encryptionFacade = this._getEncryptionFacade();
             if (!encryptionFacade.isEncryptionEnabled()) {
@@ -262,12 +262,9 @@ const MessagingService = {
                 const sender_email = senderEmailResult.success ? senderEmailResult.email : 'Unknown User';
 
                 let content;
-                let decryptSuccess = false;
-                let decryptError = null;
 
                 if (!msg.encrypted_content || !msg.encryption_nonce) {
                     content = '[Message corrupted - missing encryption data]';
-                    decryptError = 'Missing encryption data';
                 } else {
                     try {
                         content = await encryptionFacade.decryptMessage(
@@ -281,25 +278,19 @@ const MessagingService = {
                             msg.sender_id,
                             msg.recipient_id
                         );
-                        decryptSuccess = true;
                     } catch (err) {
-                        console.error('[MessagingService] Decryption failed for message:', msg.id, err.message);
+                        // SM-48: do not log per-message metadata (id/counter/epoch) or raw
+                        // decrypt error strings; surface only a generic, non-sensitive notice.
                         content = '[Cannot decrypt - sign out and sign back in to restore keys]';
-                        decryptError = err.message;
                     }
                 }
 
+                // SM-48: do not attach per-message _debugInfo (counters/epoch/decrypt
+                // status) to returned objects — it leaks metadata to any in-page code.
                 return {
                     ...msg,
                     content,
-                    sender_email,
-                    _debugInfo: {
-                        messageId: msg.id,
-                        epoch: msg.key_epoch || 0,
-                        counter: msg.message_counter,
-                        decryptSuccess,
-                        decryptError
-                    }
+                    sender_email
                 };
             }));
 

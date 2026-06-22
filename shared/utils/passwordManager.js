@@ -28,8 +28,7 @@ const PasswordManager = {
      * @param {string} password - User's password
      */
     storeTemporarily(password) {
-        console.log('[PasswordManager] Storing password temporarily for key encryption');
-
+        // SM-49: do not log password-handle lifecycle (store/use/age).
         const data = {
             password: password,
             timestamp: Date.now(),
@@ -54,26 +53,23 @@ const PasswordManager = {
         const dataStr = sessionStorage.getItem(this.STORAGE_KEY);
 
         if (!dataStr) {
-            console.log('[PasswordManager] No password stored');
             return null;
         }
 
         try {
             const data = JSON.parse(dataStr);
 
-            // Check if expired
+            // Check if expired (SM-49: do not log the handle's age/lifecycle).
             const age = Date.now() - data.timestamp;
             if (age > this.MAX_AGE_MS) {
-                console.log('[PasswordManager] Stored password expired, clearing');
                 this.clear();
                 return null;
             }
 
-            console.log('[PasswordManager] Retrieved password (age:', Math.floor(age / 1000), 'seconds)');
             return data.password;
 
         } catch (error) {
-            console.error('[PasswordManager] Error parsing stored password:', error);
+            console.error('[PasswordManager] Error parsing stored password');
             this.clear();
             return null;
         }
@@ -84,7 +80,7 @@ const PasswordManager = {
      * Called after successfully creating key backup
      */
     markUsedAndClear() {
-        console.log('[PasswordManager] Password used for encryption, clearing');
+        // SM-49: silent — do not advertise password-handle lifecycle.
         this.clear();
     },
 
@@ -92,11 +88,9 @@ const PasswordManager = {
      * Clear stored password
      */
     clear() {
-        const stack = new Error().stack;
-        console.log('[PasswordManager] ========== PASSWORD BEING CLEARED ==========');
-        console.log('[PasswordManager] Clear called from:', stack);
+        // SM-49: do not log clear-call stack traces or lifecycle messages — they
+        // advertise exactly when the temporary password handle is live.
         sessionStorage.removeItem(this.STORAGE_KEY);
-        console.log('[PasswordManager] Password cleared from memory');
     },
 
     /**
@@ -172,9 +166,6 @@ window.PasswordManager = PasswordManager;
 
 // Clear password on logout event
 window.addEventListener('auth:signout', () => {
-    console.log('[PasswordManager] Logout detected, clearing password');
+    // SM-49: silent — do not advertise password-handle lifecycle.
     PasswordManager.clear();
 });
-
-console.log('[PasswordManager] Password manager loaded');
-console.log('[PasswordManager] Password max lifetime:', PasswordManager.MAX_AGE_MS / 1000, 'seconds');

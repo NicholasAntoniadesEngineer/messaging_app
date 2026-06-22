@@ -1,8 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+// SM-20: Restrict CORS to the deployed app origin instead of a wildcard '*'.
+// Configure via the ALLOWED_ORIGIN env var; falls back to a non-wildcard
+// placeholder so an unauthorized cross-origin caller is never granted access.
+const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? 'https://your-app-domain.example'
+
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
@@ -22,10 +27,53 @@ serve(async (req) => {
   }
 
   try {
-    // Create Supabase client with service role access (bypasses RLS)
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
+    // SM-20: Authorize the caller BEFORE doing any privileged work.
+    // Require a Bearer JWT and verify it with the project's anon client
+    // (auth.getUser). Reject (401) if the header is missing/malformed or the
+    // token does not resolve to a real authenticated user.
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : ''
+
+    if (!token) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: missing bearer token' }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    // Verify the JWT against Supabase Auth using the anon (non-privileged) client.
+    const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
+
+    const { data: authData, error: authError } = await supabaseAuthClient.auth.getUser(token)
+
+    // Reject if the token is invalid/expired or does not map to a real user
+    // (e.g. the bare anon key, which has no associated user).
+    if (authError || !authData?.user) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: invalid or expired token' }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    // Caller is authenticated — now create the service-role client (bypasses RLS)
+    // used to perform the actual admin lookups.
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: {
         autoRefreshToken: false,

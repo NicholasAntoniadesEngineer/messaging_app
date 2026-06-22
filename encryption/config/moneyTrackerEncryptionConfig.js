@@ -19,8 +19,9 @@ const MoneyTrackerEncryptionConfig = EncryptionConfigBase.merge({
     },
 
     crypto: {
-        naclUrl: 'https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js',
-        naclUtilUrl: 'https://cdn.jsdelivr.net/npm/tweetnacl-util@0.15.1/nacl-util.min.js',
+        // Self-hosted (SM-11): pinned TweetNaCl 1.0.3 / nacl-util 0.15.1, no third-party CDN.
+        naclUrl: '../../shared/vendor/crypto/nacl-fast.min.js',
+        naclUtilUrl: '../../shared/vendor/crypto/nacl-util.min.js',
         loadTimeout: 15000,
         hkdf: {
             hash: 'SHA-256',

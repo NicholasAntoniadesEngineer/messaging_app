@@ -9,25 +9,52 @@
 // LOGGING CONFIGURATION - Modify these settings to control logging behavior
 // ============================================================================
 
-// Master switch for all logging
-const ENABLE_ALL_LOGS = true; // Set to true to enable logging, false to disable completely
+// Verbose logging is OFF by default (production-safe). It is enabled ONLY when
+// explicitly opted in for local debugging, never automatically in production.
+// Opt-in paths (any one enables verbose logs):
+//   - running on a local host (localhost / 127.0.0.1 / *.local)
+//   - window.LoggingConfig.DEBUG === true set before this file loads
+//   - the URL contains ?debugLogs=1
+// Errors are ALWAYS shown regardless of this switch.
+function _isLocalDebugHost() {
+    try {
+        if (typeof window === 'undefined' || !window.location) return false;
+        const host = (window.location.hostname || '').toLowerCase();
+        return host === 'localhost'
+            || host === '127.0.0.1'
+            || host === '[::1]'
+            || host === '0.0.0.0'
+            || host.endsWith('.local');
+    } catch (e) {
+        return false;
+    }
+}
+
+function _debugLogsRequested() {
+    try {
+        if (typeof window === 'undefined') return false;
+        if (window.LoggingConfig && window.LoggingConfig.DEBUG === true) return true;
+        if (window.location && typeof window.location.search === 'string') {
+            return /(?:^|[?&])debugLogs=1(?:&|$)/.test(window.location.search);
+        }
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
+// Master switch for verbose (non-error) logging. Defaults to false in production;
+// only true behind an explicit local/debug opt-in. Errors still always print.
+const ENABLE_ALL_LOGS = _isLocalDebugHost() || _debugLogsRequested();
 
 // Filter mode: 'all' = show all logs, 'filter' = only show logs matching ALLOWED_PREFIXES
 const LOG_FILTER_MODE = 'filter'; // 'all' or 'filter'
 
-// Prefixes to allow when LOG_FILTER_MODE is 'filter'
-// Only logs starting with these prefixes will be shown
+// Prefixes to allow when LOG_FILTER_MODE is 'filter' AND verbose logging is enabled.
+// Crypto/key-management/device-pairing prefixes are intentionally NOT whitelisted so
+// that no key material, pairing codes, or sensitive metadata can surface — even in a
+// debug build (see SM-07 / SM-46 / SM-47). Errors are always shown via console.error.
 const ALLOWED_PREFIXES = [
-    // Messaging & Encryption (for debugging multi-device issues)
-    '[KeyManagementService]',
-    '[HistoricalKeysService]',
-    '[KeyManager]',
-    '[CryptoService]',
-    '[KeyStorageService]',
-    '[MessagingService]',
-    '[MessengerController]',
-    '[DevicePairing',
-    '[NaClLoader]',
     // Always show errors
     'Error',
     'error',
