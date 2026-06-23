@@ -205,24 +205,16 @@
                             <div class="status-warning mb-4">
                                 <i class="fas fa-exclamation-triangle"></i>
                                 <div>
-                                    <strong>Write down these 24 words and store them safely.</strong><br>
+                                    <strong>Write down this recovery code and store it safely.</strong><br>
                                     If you forget your password, this is the ONLY way to recover your data.
                                 </div>
                             </div>
 
                             <div class="recovery-key-display mb-4" id="recovery-key-display-container">
                                 <pre id="recovery-key-display" class="whitespace-pre-wrap"></pre>
-                                <textarea id="recovery-key-edit" class="input hidden" rows="5" placeholder="Enter your custom 24-word recovery key..."></textarea>
-                            </div>
-
-                            <div id="recovery-key-word-count-display" class="text-sm text-slate-500 hidden mb-4">
-                                Word count: <span id="recovery-key-custom-count">0</span> / 24
                             </div>
 
                             <div class="flex gap-2 mb-4">
-                                <button id="edit-recovery-key-btn" class="btn btn-secondary flex-1 btn-sm">
-                                    <i class="fas fa-edit"></i> Customize
-                                </button>
                                 <button id="copy-recovery-key-btn" class="btn btn-secondary flex-1 btn-sm">
                                     <i class="fas fa-copy"></i> Copy
                                 </button>
@@ -464,19 +456,15 @@
             return new Promise((resolve) => {
                 const modal = document.getElementById('recovery-key-modal');
                 const displayEl = document.getElementById('recovery-key-display');
-                const editEl = document.getElementById('recovery-key-edit');
-                const wordCountDisplay = document.getElementById('recovery-key-word-count-display');
-                const wordCountSpan = document.getElementById('recovery-key-custom-count');
                 const checkboxEl = document.getElementById('recovery-key-saved-checkbox');
                 const continueBtn = document.getElementById('recovery-key-continue-btn');
-                const editBtn = document.getElementById('edit-recovery-key-btn');
                 const copyBtn = document.getElementById('copy-recovery-key-btn');
                 const downloadBtn = document.getElementById('download-recovery-key-btn');
                 const printBtn = document.getElementById('print-recovery-key-btn');
 
-                let currentRecoveryKey = recoveryKey;
-                let isEditMode = false;
-                const originalRecoveryKey = recoveryKey;
+                // The recovery key is system-generated (dash-Base32). No custom editing —
+                // a user-typed value can't be a valid recovery code and only risks lockout.
+                const currentRecoveryKey = recoveryKey;
 
                 displayEl.textContent = recoveryKey;
                 modal.classList.remove('hidden');
@@ -486,54 +474,7 @@
                 continueBtn.disabled = true;
 
                 checkboxEl.onchange = () => {
-                    if (isEditMode) {
-                        const words = editEl.value.trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
-                        continueBtn.disabled = !checkboxEl.checked || words.length !== 24;
-                    } else {
-                        continueBtn.disabled = !checkboxEl.checked;
-                    }
-                };
-
-                editBtn.onclick = () => {
-                    if (!isEditMode) {
-                        isEditMode = true;
-                        displayEl.classList.add('hidden');
-                        editEl.classList.remove('hidden');
-                        wordCountDisplay.classList.remove('hidden');
-                        editEl.value = currentRecoveryKey;
-                        editBtn.innerHTML = '<i class="fas fa-undo"></i> Use Generated';
-                        editEl.dispatchEvent(new Event('input'));
-                        const words = editEl.value.trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
-                        continueBtn.disabled = !checkboxEl.checked || words.length !== 24;
-                    } else {
-                        isEditMode = false;
-                        currentRecoveryKey = originalRecoveryKey;
-                        displayEl.textContent = originalRecoveryKey;
-                        displayEl.classList.remove('hidden');
-                        editEl.classList.add('hidden');
-                        wordCountDisplay.classList.add('hidden');
-                        editBtn.innerHTML = '<i class="fas fa-edit"></i> Customize';
-                        continueBtn.disabled = !checkboxEl.checked;
-                    }
-                };
-
-                editEl.oninput = () => {
-                    const text = editEl.value.trim().toLowerCase();
-                    const words = text ? text.split(/\s+/).filter(w => w.length > 0) : [];
-                    const wordCount = words.length;
-                    wordCountSpan.textContent = wordCount;
-
-                    if (wordCount === 24) {
-                        wordCountDisplay.classList.add('text-success');
-                        wordCountDisplay.classList.remove('text-slate-500');
-                        currentRecoveryKey = words.join(' ');
-                        continueBtn.disabled = !checkboxEl.checked;
-                    } else {
-                        wordCountDisplay.classList.remove('text-success');
-                        wordCountDisplay.classList.add('text-slate-500');
-                        continueBtn.disabled = true;
-                        checkboxEl.checked = false;
-                    }
+                    continueBtn.disabled = !checkboxEl.checked;
                 };
 
                 copyBtn.onclick = async () => {
@@ -547,7 +488,7 @@
                 };
 
                 downloadBtn.onclick = () => {
-                    const blob = new Blob([`Secure Messenger Recovery Key\n\nSave these 24 words in a safe place:\n\n${currentRecoveryKey}\n\nDate: ${new Date().toISOString()}\n\nIMPORTANT: This is the ONLY way to recover your encrypted messages if you forget your password.`], { type: 'text/plain' });
+                    const blob = new Blob([`Secure Messenger Recovery Key\n\nSave this recovery code in a safe place:\n\n${currentRecoveryKey}\n\nDate: ${new Date().toISOString()}\n\nIMPORTANT: This is the ONLY way to recover your encrypted messages if you forget your password.`], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -558,7 +499,7 @@
 
                 printBtn.onclick = () => {
                     const printWindow = window.open('', '_blank');
-                    printWindow.document.write(`<html><head><title>Secure Messenger Recovery Key</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#333;}.recovery-key{font-family:'Courier New',monospace;font-size:16px;line-height:2;background:#f5f5f5;padding:20px;border:2px solid #333;margin:20px 0;}.warning{color:#d32f2f;font-weight:bold;}</style></head><body><h1>Secure Messenger Recovery Key</h1><p class="warning">KEEP THIS SAFE AND SECURE</p><p>If you forget your password, these 24 words are the ONLY way to recover your encrypted messages.</p><div class="recovery-key">${currentRecoveryKey}</div><p>Date: ${new Date().toISOString()}</p></body></html>`);
+                    printWindow.document.write(`<html><head><title>Secure Messenger Recovery Key</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#333;}.recovery-key{font-family:'Courier New',monospace;font-size:16px;line-height:2;background:#f5f5f5;padding:20px;border:2px solid #333;margin:20px 0;}.warning{color:#d32f2f;font-weight:bold;}</style></head><body><h1>Secure Messenger Recovery Key</h1><p class="warning">KEEP THIS SAFE AND SECURE</p><p>If you forget your password, this recovery code is the ONLY way to recover your encrypted messages.</p><div class="recovery-key">${currentRecoveryKey}</div><p>Date: ${new Date().toISOString()}</p></body></html>`);
                     printWindow.document.close();
                     printWindow.print();
                 };
