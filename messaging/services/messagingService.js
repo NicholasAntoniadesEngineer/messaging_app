@@ -218,10 +218,11 @@ const MessagingService = {
                 return { success: false, message: null, error: 'Message created but ID not returned' };
             }
 
-            // Update conversation timestamp
+            // Update conversation timestamp. Only last_message_at — updated_at is set by
+            // a BEFORE UPDATE trigger, and the column is intentionally not client-grantable
+            // (SDB-07), so writing it here would be rejected.
             await db.queryUpdate(this._getTableName('conversations'), conversationId, {
-                last_message_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+                last_message_at: new Date().toISOString()
             });
 
             console.log('[MessagingService] Message sent:', newMessage.id);
