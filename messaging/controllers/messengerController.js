@@ -741,7 +741,27 @@ const MessengerController = {
         // payload is the same raw postgres_changes shape (payload.eventType /
         // payload.new), so the handler below is unchanged.
         const result = await window.MessagingService.subscribeToConversation(conversationId, async (payload) => {
-            // Only handle INSERT events (new messages)
+            // DELETE-FOR-EVERYONE: a message was unsent. payload.old carries the
+            // removed row (REPLICA IDENTITY FULL => old.conversation_id present).
+            // Drop the bubble for BOTH parties: the recipient learns of the delete
+            // here, and the sender's own delete echoes back here too (a no-op if the
+            // sender already removed it optimistically). Handled before the INSERT
+            // gate below because DELETE is not an INSERT.
+            if (payload.eventType === 'DELETE') {
+                const removed = payload.old;
+                if (!removed) {
+                    return;
+                }
+                // Only act on the conversation currently being viewed.
+                if (removed.conversation_id !== conversationId ||
+                    this.currentConversationId !== conversationId) {
+                    return;
+                }
+                this._removeMessageFromThread(removed.id);
+                return;
+            }
+
+            // Only handle INSERT events (new messages) past this point.
             if (payload.eventType !== 'INSERT') {
                 return;
             }
@@ -889,6 +909,24 @@ const MessengerController = {
     },
 
     /**
+     * Remove a message bubble from the thread by id (delete-for-everyone).
+     * No-op if the bubble is not present (e.g. the sender already removed it
+     * optimistically and the realtime DELETE echo arrived afterwards).
+     * @param {number|string} messageId - Message ID to remove
+     * @returns {boolean} True if a bubble was removed
+     */
+    _removeMessageFromThread(messageId) {
+        const messageThread = document.getElementById('message-thread');
+        if (!messageThread) return false;
+        const el = messageThread.querySelector(`[data-message-id="${messageId}"]`);
+        if (el) {
+            el.remove();
+            return true;
+        }
+        return false;
+    },
+
+    /**
      * Subscribe to all incoming messages for this user
      * Updates the conversation list when new messages arrive in other conversations
      * @param {string} userId - Current user ID
@@ -981,6 +1019,7 @@ const MessengerController = {
             <div class="message-content">${this._escapeHtml(message.content)}</div>
             ${attachmentsHtml}
             <div class="message-timestamp">${timestamp}</div>
+            ${this._renderDeleteControl(message, isOwnMessage)}
         `;
 
         // Append to thread
@@ -1067,6 +1106,72 @@ const MessengerController = {
                 <i class="fas fa-download" style="opacity: 0.6;"></i>
             </div>
         `;
+    },
+
+    /**
+     * DELETE-FOR-EVERYONE: build the "unsend" control for a message bubble. Returned
+     * ONLY for the current user's OWN sent messages (caller passes isOwnMessage);
+     * for any other message this returns '' so the control never appears on the
+     * recipient's view. The button id is interpolated into an inline onclick the same
+     * way _renderAttachmentItem wires downloadAttachment(); messageId is the table's
+     * BIGSERIAL primary key (a safe integer), not user-controlled text.
+     * @param {Object} message - message row (needs .id)
+     * @param {boolean} isOwnMessage - true if sender_id === current user
+     * @returns {string} HTML for the delete control, or '' when not applicable
+     */
+    _renderDeleteControl(message, isOwnMessage) {
+        if (!isOwnMessage || !message || message.id == null) {
+            return '';
+        }
+        const id = message.id;
+        return `
+            <div class="message-actions-menu" style="margin-top: 4px;">
+                <button type="button" class="message-delete-btn" data-message-id="${id}" title="Delete for everyone" aria-label="Delete for everyone" onclick="MessengerController.handleDeleteMessage(${id})" style="background: none; border: none; color: inherit; opacity: 0.55; cursor: pointer; font-size: 0.8em; padding: 2px 6px;">
+                    <i class="fas fa-trash"></i> Delete for everyone
+                </button>
+            </div>
+        `;
+    },
+
+    /**
+     * DELETE-FOR-EVERYONE: handle the user unsending one of their OWN messages.
+     * Confirms (matching the codebase's confirm()/alert() UX used for block/friend
+     * actions), then deletes via MessagingService and optimistically removes the
+     * bubble from the sender's view. The recipient (and the sender's other devices)
+     * drop the bubble via the realtime DELETE handler. On failure the bubble is
+     * restored by a thread re-render so the UI never lies about server state.
+     * @param {number|string} messageId
+     */
+    async handleDeleteMessage(messageId) {
+        // SM-43: ignore malformed ids before doing any work.
+        if (!(Number.isInteger(messageId) && messageId > 0)) {
+            console.warn('[MessengerController] handleDeleteMessage: invalid id');
+            return;
+        }
+
+        if (!confirm('Delete this message for everyone? This permanently removes it for both you and the recipient and cannot be undone.')) {
+            return;
+        }
+
+        if (typeof window.MessagingService === 'undefined' ||
+            typeof window.MessagingService.deleteMessage !== 'function') {
+            alert('Messaging service not available');
+            return;
+        }
+
+        try {
+            const result = await window.MessagingService.deleteMessage(messageId);
+            if (result.success) {
+                // Optimistic removal from the sender's own view (the realtime DELETE
+                // echo will be a no-op since the bubble is already gone).
+                this._removeMessageFromThread(messageId);
+            } else {
+                throw new Error(result.error || 'Failed to delete message');
+            }
+        } catch (error) {
+            console.error('[MessengerController] Error deleting message:', error);
+            alert(`Could not delete message: ${error.message}`);
+        }
     },
 
     /**
@@ -1161,11 +1266,12 @@ const MessengerController = {
             }
 
             return `
-                <div class="message-item ${isOwnMessage ? 'own-message' : ''}">
+                <div class="message-item ${isOwnMessage ? 'own-message' : ''}" data-message-id="${msg.id}">
                     <div class="message-sender">${this._escapeHtml(senderEmail)}</div>
                     <div class="message-content">${this._escapeHtml(msg.content)}</div>
                     ${attachmentsHtml}
                     <div class="message-timestamp">${dateString}</div>
+                    ${this._renderDeleteControl(msg, isOwnMessage)}
                 </div>
             `;
         });
@@ -1505,11 +1611,12 @@ const MessengerController = {
 
             // Generate HTML for the new message (regular message only, not share requests)
             const messageHtml = `
-                <div class="message-item ${isOwnMessage ? 'own-message' : ''}">
+                <div class="message-item ${isOwnMessage ? 'own-message' : ''}" data-message-id="${message.id}">
                     <div class="message-sender">${this._escapeHtml(senderEmail)}</div>
                     <div class="message-content">${this._escapeHtml(message.content)}</div>
                     ${attachmentsHtml}
                     <div class="message-timestamp">${dateString}</div>
+                    ${this._renderDeleteControl(message, isOwnMessage)}
                 </div>
             `;
 

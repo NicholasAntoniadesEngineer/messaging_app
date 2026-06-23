@@ -500,6 +500,62 @@ const MessagingService = {
         }
     },
 
+    /**
+     * DELETE FOR EVERYONE ("unsend"): hard-delete a message the caller SENT. The row
+     * is physically removed for BOTH parties (no tombstone). RLS (messages_delete_own)
+     * enforces sender-only: a non-sender's DELETE matches no row, so the request
+     * succeeds with zero rows affected, which we surface as a typed authorization
+     * error rather than a silent success.
+     *
+     * After a confirmed delete, best-effort removes the local per-message-key archive
+     * (KeyStorageService.deleteDecryptedMessageKey) as housekeeping — a failure there
+     * never fails the delete (the server row is already gone).
+     *
+     * @param {number|string} messageId
+     * @returns {Promise<{success: boolean, error: string|null}>}
+     */
+    async deleteMessage(messageId) {
+        try {
+            // SM-43: validate the id at the entry point.
+            if (!this._isValidId(messageId)) {
+                return { success: false, error: 'Invalid message' };
+            }
+
+            const db = this._getDatabaseService();
+            const table = this._getTableName('messages');
+
+            // RLS enforces sender-only; queryDelete uses select=* so `data` is the
+            // rows actually removed. Empty data => the row was not ours (or already
+            // gone): treat as a typed not-authorized error, not a success.
+            const result = await db.queryDelete(table, { id: messageId });
+            if (result.error) {
+                console.error('[MessagingService] Error deleting message:', result.error);
+                return { success: false, error: result.error.message || 'Failed to delete message' };
+            }
+            const deleted = Array.isArray(result.data) ? result.data.length : (result.data ? 1 : 0);
+            if (deleted === 0) {
+                return { success: false, error: 'Message not found or you are not allowed to delete it' };
+            }
+
+            // Housekeeping: drop the archived per-message decryption key for this
+            // message. Best-effort and non-fatal — the server row is already deleted.
+            try {
+                const keyStore = (typeof window !== 'undefined') ? window.KeyStorageService : undefined;
+                if (keyStore && typeof keyStore.deleteDecryptedMessageKey === 'function') {
+                    await keyStore.deleteDecryptedMessageKey(messageId);
+                }
+            } catch (keyErr) {
+                console.warn('[MessagingService] Failed to remove archived message key:', keyErr.message);
+            }
+
+            console.log('[MessagingService] Message deleted:', messageId);
+            return { success: true, error: null };
+        } catch (error) {
+            console.error('[MessagingService] deleteMessage error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
     async markConversationAsRead(conversationId, userId) {
         console.log('[MessagingService] markConversationAsRead()', { conversationId, userId });
         try {
@@ -619,7 +675,13 @@ const MessagingService = {
             return new Promise((resolve) => {
                 const channel = db.client.channel(channelName)
                     .on('postgres_changes', {
-                        event: 'INSERT',
+                        // '*' so the conversation channel also delivers DELETE events
+                        // (delete-for-everyone). DELETE payloads carry the old row in
+                        // payload.old; REPLICA IDENTITY FULL on messages ensures
+                        // old.conversation_id is present so this conversation_id filter
+                        // matches the DELETE. The controller's handler branches on
+                        // payload.eventType (INSERT vs DELETE).
+                        event: '*',
                         schema: 'public',
                         table: this._getTableName('messages'),
                         filter: `conversation_id=eq.${conversationId}`
