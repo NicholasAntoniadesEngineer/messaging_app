@@ -739,9 +739,6 @@
 
                         await window.KeyManagementService.createDualBackup(password, recoveryKeyToUse);
 
-                        const deviceName = window.DevicePairingService?.getDeviceName() || 'Primary Device';
-                        await window.DevicePairingService.registerDevice(userId, deviceName, true);
-
                         window.PasswordManager?.clear();
 
                         document.getElementById('recovery-key-modal').style.display = 'none';
@@ -1075,11 +1072,9 @@
                 const userId = document.getElementById('recovery-key-restore-section').dataset.userId;
                 const recoveryKey = recoveryKeyText;
 
-                // Parse the dash-separated Base32 recovery code to bytes
-                const recoveryKeyBytes = window.PasswordCryptoService.parseRecoveryKey(recoveryKey);
-
                 console.log('[Auth] Restoring keys from recovery key...');
-                await window.KeyManagementService.restoreFromRecoveryKey(recoveryKeyBytes);
+                // The service owns the single authoritative Base32 decode — pass the raw key.
+                await window.KeyManagementService.restoreFromRecoveryKey(recoveryKey);
 
                 // Re-encrypt backup with the new password
                 const newPassword = window.PasswordManager?.retrieve();
