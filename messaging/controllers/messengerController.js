@@ -160,7 +160,9 @@ const MessengerController = {
             console.log('[MessengerController] init() complete, conversations:', this.conversations.length);
         } catch (error) {
             console.error('[MessengerController] init() failed:', error);
-            alert('Error loading messenger. Please check console for details.');
+            // Page-load failure must NOT block the UI with a modal: show a
+            // dismissible, non-blocking inline notice instead of alert().
+            this._showLoadErrorNotice('Could not load messenger. Some features may be unavailable.');
         } finally {
             this.isInitializing = false;
         }
@@ -1198,6 +1200,64 @@ const MessengerController = {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    },
+
+    /**
+     * Surface a NON-BLOCKING, dismissible inline notice for page-init/load
+     * failures (replaces the old modal alert()). Never blocks the UI — the
+     * page stays usable in the backend-less preview or on a transient error.
+     * Auto-dismisses after a few seconds and has a manual close button.
+     * @param {string} message - Human-readable message (will be escaped).
+     */
+    _showLoadErrorNotice(message) {
+        try {
+            // De-dupe: one load-error notice at a time.
+            const existing = document.querySelector('[data-load-error-notice="messenger"]');
+            if (existing) existing.remove();
+
+            const notice = document.createElement('div');
+            notice.setAttribute('data-load-error-notice', 'messenger');
+            notice.setAttribute('role', 'status');
+            notice.style.cssText = [
+                'position: fixed',
+                'top: 16px',
+                'left: 50%',
+                'transform: translateX(-50%)',
+                'z-index: 10000',
+                'max-width: min(92vw, 460px)',
+                'background: var(--warning-bg, #fff3cd)',
+                'color: var(--warning-color, #856404)',
+                'border: 1px solid var(--warning-border, #ffeeba)',
+                'border-radius: 6px',
+                'padding: 10px 12px',
+                'box-shadow: 0 2px 8px rgba(0,0,0,0.15)',
+                'font-size: 0.9em',
+                'display: flex',
+                'align-items: center',
+                'justify-content: space-between',
+                'gap: 8px'
+            ].join(';');
+
+            const msgSpan = document.createElement('span');
+            msgSpan.innerHTML = this._escapeHtml(message);
+
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.setAttribute('aria-label', 'Dismiss');
+            closeBtn.textContent = '×';
+            closeBtn.style.cssText = 'background:none;border:none;font-size:1.2em;line-height:1;cursor:pointer;color:inherit;flex-shrink:0;';
+            closeBtn.addEventListener('click', () => notice.remove());
+
+            notice.appendChild(msgSpan);
+            notice.appendChild(closeBtn);
+            (document.body || document.documentElement).appendChild(notice);
+
+            // Auto-dismiss so it never lingers.
+            setTimeout(() => { if (notice.isConnected) notice.remove(); }, 8000);
+        } catch (e) {
+            // Last resort: never throw from an error handler, never use a modal.
+            console.error('[MessengerController] _showLoadErrorNotice failed:', e);
+        }
     },
 
     /**

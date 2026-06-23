@@ -199,6 +199,57 @@
     <script src="../controllers/settingsController.js"></script>
 
     <script>
+        // Surface a NON-BLOCKING, dismissible inline notice for page-init/load
+        // failures (replaces the old modal alert()). Never blocks the UI — the
+        // page stays usable in the backend-less preview or on a transient error.
+        function showSettingsLoadErrorNotice(message) {
+            try {
+                var existing = document.querySelector('[data-load-error-notice="settings"]');
+                if (existing) existing.remove();
+
+                var notice = document.createElement('div');
+                notice.setAttribute('data-load-error-notice', 'settings');
+                notice.setAttribute('role', 'status');
+                notice.style.cssText = [
+                    'position: fixed',
+                    'top: 16px',
+                    'left: 50%',
+                    'transform: translateX(-50%)',
+                    'z-index: 10000',
+                    'max-width: min(92vw, 460px)',
+                    'background: var(--warning-bg, #fff3cd)',
+                    'color: var(--warning-color, #856404)',
+                    'border: 1px solid var(--warning-border, #ffeeba)',
+                    'border-radius: 6px',
+                    'padding: 10px 12px',
+                    'box-shadow: 0 2px 8px rgba(0,0,0,0.15)',
+                    'font-size: 0.9em',
+                    'display: flex',
+                    'align-items: center',
+                    'justify-content: space-between',
+                    'gap: 8px'
+                ].join(';');
+
+                var msgSpan = document.createElement('span');
+                msgSpan.textContent = message; // textContent => inherently XSS-safe
+
+                var closeBtn = document.createElement('button');
+                closeBtn.type = 'button';
+                closeBtn.setAttribute('aria-label', 'Dismiss');
+                closeBtn.textContent = '×';
+                closeBtn.style.cssText = 'background:none;border:none;font-size:1.2em;line-height:1;cursor:pointer;color:inherit;flex-shrink:0;';
+                closeBtn.addEventListener('click', function() { notice.remove(); });
+
+                notice.appendChild(msgSpan);
+                notice.appendChild(closeBtn);
+                (document.body || document.documentElement).appendChild(notice);
+
+                setTimeout(function() { if (notice.isConnected) notice.remove(); }, 8000);
+            } catch (e) {
+                console.error('[SettingsPage] showSettingsLoadErrorNotice failed:', e);
+            }
+        }
+
         // Bootstrap mirrors messenger.html: init config -> services -> AuthGuard -> controller.
         document.addEventListener('DOMContentLoaded', async function() {
             console.log('[SettingsPage] DOMContentLoaded - starting initialization');
@@ -276,7 +327,7 @@
                 console.log('[SettingsPage] Initialization complete!');
             } catch (error) {
                 console.error('[SettingsPage] Initialization error:', error);
-                alert('Failed to initialize the settings page. Please refresh and try again.');
+                showSettingsLoadErrorNotice('Failed to initialize the settings page. Please refresh and try again.');
             }
         });
     </script>
