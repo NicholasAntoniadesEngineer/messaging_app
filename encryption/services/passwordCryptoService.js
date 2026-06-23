@@ -180,8 +180,14 @@ const PasswordCryptoService = {
      * Generate a random recovery key (256-bit)
      * @returns {string} Base64-encoded recovery key
      */
+    // TESTING: recovery key shortened to 8 display groups (20 bytes / 160-bit) so it
+    // is easier to type during multi-device testing. formatRecoveryKey groups Base32
+    // by 4 chars, so 20 bytes -> 32 chars -> 8 groups ("8 elements"). For PRODUCTION
+    // set this back to 32 (full 256-bit). One-line revert.
+    RECOVERY_KEY_BYTES: 20,
+
     generateRecoveryKey() {
-        const key = crypto.getRandomValues(new Uint8Array(32));
+        const key = crypto.getRandomValues(new Uint8Array(this.RECOVERY_KEY_BYTES));
         return this._arrayToBase64(key);
     },
 

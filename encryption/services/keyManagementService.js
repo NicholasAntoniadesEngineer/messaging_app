@@ -1191,6 +1191,68 @@ const KeyManagementService = {
     },
 
     /**
+     * Export the material a NEW device needs to read ALL existing data: the identity
+     * secret (so ECDH sessions re-derive) AND the session backup key (so stored
+     * session keys restore). Used ONLY by the device-pairing flow, which wraps this
+     * bundle under a high-entropy, single-use, expiring code (PBKDF2 + AES-GCM)
+     * before it ever touches the server. The raw secret never leaves unprotected.
+     * @returns {Promise<{v:number, identitySecretB64:string, sessionBackupKeyB64:(string|null)}>}
+     */
+    async exportPairingBundle() {
+        if (!this.currentUserId) throw new Error('[KeyManagementService] Not initialized');
+        const keys = await KeyStorageService.getIdentityKeys(this.currentUserId);
+        if (!keys || !keys.secretKey) throw new Error('No local identity keys to share');
+        return {
+            v: 1,
+            identitySecretB64: CryptoPrimitivesService.serializeKey(keys.secretKey),
+            sessionBackupKeyB64: this._sessionBackupKey
+                ? CryptoPrimitivesService.serializeKey(this._sessionBackupKey)
+                : null
+        };
+    },
+
+    /**
+     * Install a pairing bundle on a NEW device: derive the public key from the
+     * transferred secret, store the identity locally (wrapped at rest, SM-02), adopt
+     * the session backup key, then sync sessions + partner keys so existing history
+     * is readable. Mirrors restoreFromPassword's post-restore sync.
+     * @param {Object} bundle - from exportPairingBundle on the other device
+     * @returns {Promise<{success:boolean}>}
+     */
+    async importPairingBundle(bundle) {
+        if (!this.currentUserId) throw new Error('[KeyManagementService] Not initialized');
+        if (!bundle || !bundle.identitySecretB64) throw new Error('Invalid pairing bundle');
+
+        const secretKey = CryptoPrimitivesService.deserializeKey(bundle.identitySecretB64);
+        const keyPair = CryptoPrimitivesService.keyPairFromSecretKey(secretKey);
+        const publicKey = keyPair.publicKey;
+
+        // Self-heal: if the server's published key differs, re-publish the derived one.
+        const derivedPublicKeyB64 = CryptoPrimitivesService.serializeKey(publicKey);
+        const dbPublicKeyB64 = await HistoricalKeysService.getCurrentKey(this.currentUserId);
+        if (dbPublicKeyB64 && dbPublicKeyB64 !== derivedPublicKeyB64) {
+            await this._uploadPublicKeyToServer(this.currentUserId, derivedPublicKeyB64);
+        }
+
+        await KeyStorageService.storeIdentityKeys(this.currentUserId, { publicKey, secretKey });
+
+        this._sessionBackupKey = bundle.sessionBackupKeyB64
+            ? CryptoPrimitivesService.deserializeKey(bundle.sessionBackupKeyB64)
+            : null;
+
+        await this._fetchCurrentEpoch(this.currentUserId);
+        if (this._sessionBackupKey) {
+            await this._syncSessionKeys(this.currentUserId);
+        }
+        await HistoricalKeysService.syncToLocal(this.currentUserId);
+        await this._syncConversationPartnerKeys(this.currentUserId);
+
+        this.initialized = true;
+        console.log('[KeyManagementService] Pairing bundle imported');
+        return { success: true };
+    },
+
+    /**
      * Sync session keys from database to local
      * Requires session backup key to be available
      * @private
