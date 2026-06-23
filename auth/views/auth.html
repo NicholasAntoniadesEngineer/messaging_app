@@ -125,9 +125,9 @@
 
                 <div class="form-group">
                     <label for="recovery-key-input" class="label">Recovery Key</label>
-                    <textarea id="recovery-key-input" class="input" rows="4" placeholder="Enter your 24-word recovery key..."></textarea>
+                    <textarea id="recovery-key-input" class="input" rows="3" placeholder="Enter your recovery key (e.g. ABCD-EFGH-IJKL-...)"></textarea>
                     <div class="text-sm text-slate-500 mt-1">
-                        <span id="recovery-word-count">0</span> / 24 words
+                        <span id="recovery-word-count">0</span> characters
                     </div>
                     <div class="form-error hidden" id="recovery-restore-error"></div>
                 </div>
@@ -1051,23 +1051,19 @@
         // --- Recovery Key Restore (post-password-reset) ---
 
         document.getElementById('recovery-key-input').addEventListener('input', () => {
-            const text = document.getElementById('recovery-key-input').value.trim().toLowerCase();
-            const words = text ? text.split(/\s+/).filter(w => w.length > 0) : [];
-            const wordCount = words.length;
+            // Recovery key is dash-separated Base32 groups (NOT space-separated words).
+            const clean = document.getElementById('recovery-key-input').value.replace(/[^A-Za-z0-9]/g, '');
             const countEl = document.getElementById('recovery-word-count');
-            countEl.textContent = wordCount;
-
-            const restoreBtn = document.getElementById('restore-with-recovery-btn');
-            restoreBtn.disabled = wordCount !== 24;
+            if (countEl) countEl.textContent = clean.length;
+            document.getElementById('restore-with-recovery-btn').disabled = clean.length < 8;
         });
 
         document.getElementById('restore-with-recovery-btn').addEventListener('click', async () => {
             clearErrors();
-            const recoveryKeyText = document.getElementById('recovery-key-input').value.trim().toLowerCase();
-            const words = recoveryKeyText.split(/\s+/).filter(w => w.length > 0);
+            const recoveryKeyText = document.getElementById('recovery-key-input').value.trim();
 
-            if (words.length !== 24) {
-                showError('recovery-restore-error', 'Please enter exactly 24 words');
+            if (recoveryKeyText.replace(/[^A-Za-z0-9]/g, '').length < 8) {
+                showError('recovery-restore-error', 'Please enter your full recovery key');
                 return;
             }
 
