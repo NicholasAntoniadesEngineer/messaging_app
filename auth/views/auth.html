@@ -498,8 +498,17 @@
                 };
 
                 printBtn.onclick = () => {
+                    // FE-03: HTML-escape the recovery key before it is written into
+                    // the print document. Self-XSS only (the user prints their own
+                    // key), but cheap to close.
+                    const escapeHtml = (s) => String(s)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
                     const printWindow = window.open('', '_blank');
-                    printWindow.document.write(`<html><head><title>Secure Messenger Recovery Key</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#333;}.recovery-key{font-family:'Courier New',monospace;font-size:16px;line-height:2;background:#f5f5f5;padding:20px;border:2px solid #333;margin:20px 0;}.warning{color:#d32f2f;font-weight:bold;}</style></head><body><h1>Secure Messenger Recovery Key</h1><p class="warning">KEEP THIS SAFE AND SECURE</p><p>If you forget your password, this recovery code is the ONLY way to recover your encrypted messages.</p><div class="recovery-key">${currentRecoveryKey}</div><p>Date: ${new Date().toISOString()}</p></body></html>`);
+                    printWindow.document.write(`<html><head><title>Secure Messenger Recovery Key</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#333;}.recovery-key{font-family:'Courier New',monospace;font-size:16px;line-height:2;background:#f5f5f5;padding:20px;border:2px solid #333;margin:20px 0;}.warning{color:#d32f2f;font-weight:bold;}</style></head><body><h1>Secure Messenger Recovery Key</h1><p class="warning">KEEP THIS SAFE AND SECURE</p><p>If you forget your password, this recovery code is the ONLY way to recover your encrypted messages.</p><div class="recovery-key">${escapeHtml(currentRecoveryKey)}</div><p>Date: ${new Date().toISOString()}</p></body></html>`);
                     printWindow.document.close();
                     printWindow.print();
                 };

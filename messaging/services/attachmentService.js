@@ -88,6 +88,39 @@ const AttachmentService = {
     },
 
     /**
+     * MSG-05: sanitize an uploader-controlled file name before it is used as the
+     * `<a download>` save name. The stored name is attacker-controlled, so a
+     * crafted value can spoof its apparent type via Unicode bidi-override
+     * characters (e.g. "exe‮gpj.txt" rendering as a .jpg) or via path
+     * separators / leading dots. We use a DENYLIST so international/UTF-8 names
+     * are preserved (an allowlist would mangle legitimate non-Latin names):
+     *   - strip ASCII control chars (U+0000–U+001F, U+007F)
+     *   - strip Unicode bidi-override / isolate chars (U+202A–U+202E, U+2066–U+2069)
+     *   - strip path separators (/ and \)
+     *   - strip leading dots (no ".."/dotfile traversal in the save name)
+     * Collapses to a safe fallback if nothing usable remains.
+     * @param {string} name - Raw, uploader-controlled file name
+     * @returns {string} Sanitized save name (never empty)
+     */
+    _sanitizeFileName(name) {
+        const fallback = 'download';
+        if (typeof name !== 'string') {
+            return fallback;
+        }
+        const cleaned = name
+            // ASCII control characters (U+0000-U+001F, U+007F)
+            .replace(/[\u0000-\u001F\u007F]/g, '')
+            // Unicode bidi overrides (U+202A-U+202E) + isolates (U+2066-U+2069)
+            .replace(/[\u202A-\u202E\u2066-\u2069]/g, '')
+            // path separators
+            .replace(/[\/\\]/g, '')
+            // leading dots (dotfiles / traversal)
+            .replace(/^\.+/, '')
+            .trim();
+        return cleaned.length > 0 ? cleaned : fallback;
+    },
+
+    /**
      * Whether the storage bucket is available
      */
     _bucketAvailable: null,
@@ -542,12 +575,15 @@ const AttachmentService = {
             // (html/svg/xhtml/xml/js, by MIME or extension) are coerced to
             // application/octet-stream so they cannot render inline in the
             // origin; images/pdf/normal docs keep their real type.
+            // MSG-05: sanitize the uploader-controlled name ONCE here before it
+            // becomes the <a download> save name. _safeDownloadType still inspects
+            // the original name/MIME for dangerous-type coercion.
             return {
                 success: true,
                 data: new Blob([decryptedData], {
                     type: this._safeDownloadType(attachment.mime_type, attachment.file_name)
                 }),
-                fileName: attachment.file_name
+                fileName: this._sanitizeFileName(attachment.file_name)
             };
         } catch (error) {
             console.error('[AttachmentService] Download error:', error);

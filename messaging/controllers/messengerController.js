@@ -21,6 +21,7 @@ const MessengerController = {
     _conversationSubscription: null, // For current open conversation
     _subscribedConversationId: null, // Track which conversation we're subscribed to
     _userMessagesSubscription: null, // For all incoming messages (conversation list updates)
+    _attachmentPolls: new Set(), // MSG-04: message IDs with an in-flight attachment poll (single-flight)
 
     /**
      * Initialize the messenger page
@@ -718,9 +719,15 @@ const MessengerController = {
         // Store the conversation ID we're subscribing to for validation
         this._subscribedConversationId = conversationId;
 
-        // Use the global message subscription (filter by recipient_id which we know works)
-        // and filter for this specific conversation in the callback
-        const result = await window.MessagingService.subscribeToMessages(currentUserId, async (payload) => {
+        // MSG-01/MSG-06: subscribe on a per-conversation topic
+        // (`conversation:${conversationId}`) instead of reusing the global
+        // `messages:${userId}` topic that _subscribeToUserMessages owns. Sharing
+        // one topic meant tearing this channel down disturbed the shared topic and
+        // repeated opens leaked channels. The service filters INSERT +
+        // conversation_id server-side; RLS still scopes rows to participants. The
+        // payload is the same raw postgres_changes shape (payload.eventType /
+        // payload.new), so the handler below is unchanged.
+        const result = await window.MessagingService.subscribeToConversation(conversationId, async (payload) => {
             // Only handle INSERT events (new messages)
             if (payload.eventType !== 'INSERT') {
                 return;
@@ -804,24 +811,37 @@ const MessengerController = {
                 attachments: []
             });
 
-            // Fetch attachments with retry (attachment may still be uploading)
-            if (window.AttachmentService) {
+            // Fetch attachments (the attachment row may still be uploading when the
+            // message INSERT arrives). MSG-04: there is no has_attachment column, so
+            // we must poll, but with exponential backoff instead of a fixed
+            // 50x/200ms busy-loop, and single-flight per message so overlapping
+            // realtime events for the same id don't stack polls. ~10 attempts,
+            // 200ms doubling capped at 2000ms => ~10s total wall-clock, preserving
+            // coverage for slow/large attachment delivery.
+            if (window.AttachmentService && !this._attachmentPolls.has(newMessage.id)) {
+                this._attachmentPolls.add(newMessage.id);
                 const fetchAttachments = async () => {
-                    const maxRetries = 50;
-                    const retryDelay = 200;
-                    for (let attempt = 0; attempt < maxRetries; attempt++) {
-                        try {
-                            const attachments = await window.AttachmentService.getMessageAttachments(newMessage.id);
-                            if (attachments.length > 0) {
-                                this._updateMessageAttachments(newMessage.id, attachments);
-                                return;
+                    const maxAttempts = 10;
+                    let delay = 200;
+                    const maxDelay = 2000;
+                    try {
+                        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                            try {
+                                const attachments = await window.AttachmentService.getMessageAttachments(newMessage.id);
+                                if (attachments.length > 0) {
+                                    this._updateMessageAttachments(newMessage.id, attachments);
+                                    return;
+                                }
+                            } catch (e) {
+                                console.warn('[MessengerController] Failed to fetch attachments:', e);
                             }
-                            if (attempt < maxRetries - 1) {
-                                await new Promise(r => setTimeout(r, retryDelay));
+                            if (attempt < maxAttempts - 1) {
+                                await new Promise(r => setTimeout(r, delay));
+                                delay = Math.min(delay * 2, maxDelay);
                             }
-                        } catch (e) {
-                            console.warn('[MessengerController] Failed to fetch attachments:', e);
                         }
+                    } finally {
+                        this._attachmentPolls.delete(newMessage.id);
                     }
                 };
                 fetchAttachments();
