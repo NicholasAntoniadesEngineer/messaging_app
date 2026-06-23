@@ -1253,9 +1253,36 @@ const MessengerController = {
         verifyBtn.addEventListener('click', async () => {
             try {
                 const facade = window.EncryptionModule?.getFacade();
-                const safety = facade && facade.isSetUp()
-                    ? await facade.getSafetyNumber(otherUserId)
-                    : null;
+                if (!facade || !facade.isSetUp()) {
+                    alert('Safety number unavailable.');
+                    return;
+                }
+
+                // While an identity change is PENDING, getSafetyNumber routes through the
+                // pinning chokepoint and throws fail-closed — so it cannot show the NEW
+                // key's number. Use getPendingPeerIdentity (read-only, never pins) to show
+                // the NEW number (and the old one) so the user can compare out-of-band
+                // BEFORE Accept. Fall back to getSafetyNumber when no change is pending or
+                // the method is unavailable (older facade).
+                if (typeof facade.getPendingPeerIdentity === 'function') {
+                    const pending = await facade.getPendingPeerIdentity(otherUserId);
+                    if (pending && pending.changed && pending.newSafetyNumber) {
+                        const lines = [
+                            'A new identity key is pending for this contact.',
+                            'Compare the NEW safety number with your contact out-of-band before accepting:',
+                            '',
+                            'NEW: ' + pending.newSafetyNumber
+                        ];
+                        if (pending.oldSafetyNumber) {
+                            lines.push('', 'OLD (currently trusted): ' + pending.oldSafetyNumber);
+                        }
+                        alert(lines.join('\n'));
+                        return;
+                    }
+                }
+
+                // No pending change — show the current (pinned) safety number as before.
+                const safety = await facade.getSafetyNumber(otherUserId);
                 alert(safety
                     ? `Compare this safety number with your contact out-of-band before accepting:\n\n${safety}`
                     : 'Safety number unavailable.');
