@@ -1304,7 +1304,7 @@ const MessengerController = {
                 notice.remove();
                 // Reload the thread now that the new identity is pinned.
                 if (this.currentConversationId) {
-                    await this.loadMessages(this.currentConversationId);
+                    await this.openConversation(this.currentConversationId);
                 }
             } catch (e) {
                 console.error('[MessengerController] acceptPeerIdentityChange failed:', e);
