@@ -290,6 +290,40 @@ const MessengerController = {
                 this.clearSelectedAttachment();
             });
         }
+
+        // W2-1 / H-5: delegated click handling for dynamically-rendered message
+        // content (attachment rows + delete-for-everyone buttons). The ids these
+        // controls carry are server-controlled, so we read them from data-*
+        // attributes and RE-VALIDATE (positive integer) at click time before doing
+        // any work — never interpolating an id into an inline onclick. One listener
+        // on the static thread container covers every message rendered into it by
+        // renderMessageThread / _appendMessageToThread / appendMessageToThread /
+        // _updateMessageAttachments, so re-renders need no re-wiring.
+        const messageThread = document.getElementById('message-thread');
+        if (messageThread && !messageThread._delegatedClickWired) {
+            messageThread._delegatedClickWired = true;
+            messageThread.addEventListener('click', (e) => {
+                // Delete-for-everyone button (own messages only; the markup is only
+                // emitted for own messages, but we re-check the id regardless).
+                const deleteBtn = e.target.closest('.message-delete-btn');
+                if (deleteBtn && messageThread.contains(deleteBtn)) {
+                    const id = Number(deleteBtn.dataset.messageId);
+                    if (Number.isInteger(id) && id > 0) {
+                        this.handleDeleteMessage(id);
+                    }
+                    return;
+                }
+
+                // Clickable (non-expired) attachment row -> download.
+                const attachmentEl = e.target.closest('.message-attachment-clickable');
+                if (attachmentEl && messageThread.contains(attachmentEl)) {
+                    const id = Number(attachmentEl.dataset.attachmentId);
+                    if (Number.isInteger(id) && id > 0) {
+                        this.downloadAttachment(id);
+                    }
+                }
+            });
+        }
     },
 
     /**
@@ -793,12 +827,23 @@ const MessengerController = {
                 return;
             }
 
-            // Decrypt the message
-            let content = newMessage.content;
-            if (newMessage.is_encrypted && newMessage.encrypted_content) {
+            // W3-1: NEVER seed content from the server-controlled realtime payload.
+            // The `messages` table has no `content` column, so a `content` field on
+            // the wire can only be forged by a compromised server / MITM. Treat the
+            // realtime path as encrypted-only — exactly like the batch/history path
+            // (messagingService.getMessages): require encrypted_content + nonce and
+            // route through the ratchet, otherwise render a neutral placeholder.
+            // We do NOT trust newMessage.is_encrypted as a content gate (it too is
+            // server-controlled); the presence of real ciphertext is the gate.
+            let content;
+            if (!newMessage.encrypted_content || !newMessage.encryption_nonce) {
+                content = '[Message unavailable]';
+            } else {
                 try {
                     const encryptionFacade = window.EncryptionModule?.getFacade();
-                    if (encryptionFacade && encryptionFacade.isSetUp()) {
+                    if (!encryptionFacade || !encryptionFacade.isSetUp()) {
+                        content = '[Cannot decrypt message]';
+                    } else {
                         // Find the conversation to get recipient ID for decryption
                         const conversation = this.conversations.find(c => c.id === conversationId);
                         const recipientId = conversation?.other_user_id === newMessage.sender_id
@@ -1094,7 +1139,15 @@ const MessengerController = {
         const iconClass = window.AttachmentService?.getFileIcon(att.mimeType || att.mime_type) || 'fa-file';
         const fileSize = window.AttachmentService?.formatFileSize(att.fileSize || att.file_size) || '';
         const fileName = att.fileName || att.file_name || 'Attachment';
-        const attId = att.id;
+        // W2-1: the id is server-controlled at the render boundary. Coerce to a
+        // number here (the service already drops non-integer ids, this is the
+        // belt-and-suspenders second layer) so we never interpolate an
+        // attacker-chosen string into the markup. If it isn't a positive integer
+        // we still render the row but omit the data-attachment-id, so the
+        // delegated click handler (which re-validates) treats it as non-clickable.
+        const attId = Number(att.id);
+        const hasValidId = Number.isInteger(attId) && attId > 0;
+        const idAttr = hasValidId ? ` data-attachment-id="${attId}"` : '';
 
         const expiresAt = att.expiresAt || att.expires_at;
         const isExpired = att.expired === true ||
@@ -1102,7 +1155,7 @@ const MessengerController = {
 
         if (isExpired) {
             return `
-                <div class="message-attachment message-attachment-expired" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.08); border-radius: 6px; opacity: 0.6;">
+                <div class="message-attachment message-attachment-expired"${idAttr} style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.08); border-radius: 6px; opacity: 0.6;">
                     <i class="fas fa-clock" style="font-size: 1.1em;"></i>
                     <div style="flex: 1; min-width: 0;">
                         <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
@@ -1112,8 +1165,12 @@ const MessengerController = {
             `;
         }
 
+        // W2-1 / H-5: no inline onclick/onmouseover handlers. The id lives only in
+        // data-attachment-id; a single delegated listener on #message-thread
+        // (wired in setupEventListeners) re-validates it and calls
+        // downloadAttachment. The hover effect is the .message-attachment CSS class.
         return `
-            <div class="message-attachment" data-attachment-id="${attId}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;" onclick="MessengerController.downloadAttachment(${attId})" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">
+            <div class="message-attachment message-attachment-clickable"${idAttr} style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 6px; background: rgba(0,0,0,0.15); border-radius: 6px; cursor: pointer; transition: background 0.2s;">
                 <i class="fas ${iconClass}" style="font-size: 1.1em;"></i>
                 <div style="flex: 1; min-width: 0;">
                     <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em;">${this._escapeHtml(fileName)}</div>
@@ -1128,9 +1185,11 @@ const MessengerController = {
      * DELETE-FOR-EVERYONE: build the "unsend" control for a message bubble. Returned
      * ONLY for the current user's OWN sent messages (caller passes isOwnMessage);
      * for any other message this returns '' so the control never appears on the
-     * recipient's view. The button id is interpolated into an inline onclick the same
-     * way _renderAttachmentItem wires downloadAttachment(); messageId is the table's
-     * BIGSERIAL primary key (a safe integer), not user-controlled text.
+     * recipient's view. W2-1/H-5: the id lives only in data-message-id (Number-
+     * coerced); a delegated listener on #message-thread (wired in
+     * setupEventListeners) re-validates it and calls handleDeleteMessage. No inline
+     * onclick. messageId is the table's BIGSERIAL primary key, but it is still
+     * server-controlled on the wire, so we coerce defensively.
      * @param {Object} message - message row (needs .id)
      * @param {boolean} isOwnMessage - true if sender_id === current user
      * @returns {string} HTML for the delete control, or '' when not applicable
@@ -1139,10 +1198,13 @@ const MessengerController = {
         if (!isOwnMessage || !message || message.id == null) {
             return '';
         }
-        const id = message.id;
+        const id = Number(message.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return '';
+        }
         return `
             <div class="message-actions-menu" style="margin-top: 4px;">
-                <button type="button" class="message-delete-btn" data-message-id="${id}" title="Delete for everyone" aria-label="Delete for everyone" onclick="MessengerController.handleDeleteMessage(${id})" style="background: none; border: none; color: inherit; opacity: 0.55; cursor: pointer; font-size: 0.8em; padding: 2px 6px;">
+                <button type="button" class="message-delete-btn" data-message-id="${id}" title="Delete for everyone" aria-label="Delete for everyone" style="background: none; border: none; color: inherit; opacity: 0.55; cursor: pointer; font-size: 0.8em; padding: 2px 6px;">
                     <i class="fas fa-trash"></i> Delete for everyone
                 </button>
             </div>

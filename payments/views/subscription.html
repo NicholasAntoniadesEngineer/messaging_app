@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Content-Security-Policy (SM-19) -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <!-- Content-Security-Policy (SM-19). H-5: inline scripts externalized
+         (subscriptionFontScale.js + subscriptionPageInit.js) so the script-src
+         directive no longer needs unsafe-inline. The anti-framing directive is
+         added below (spec-ignored in a meta CSP but kept here belt-and-suspenders;
+         real enforcement should also be an HTTP response header).
+         https://js.stripe.com kept for Stripe.js. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>Subscription - Secure Messenger</title>
     <link rel="stylesheet" href="../../lib/auth_db/shared/vendor/font-awesome/css/all.min.css">
     <link rel="stylesheet" href="../../lib/auth_db/shared/styles/main-compiled.css">
     <link rel="stylesheet" href="../../lib/auth_db/shared/styles/dark-theme.css?v=2">
     <script src="../../lib/auth_db/shared/vendor/supabase/supabase.min.js"></script>
     <script src="https://js.stripe.com/v3/"></script>
-    <script>
-        (function() {
-            var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
-            var s = localStorage.getItem('secure_messenger_fontScale') || 'medium';
-            document.documentElement.style.fontSize = (m[s] || 16) + 'px';
-        })();
-    </script>
+    <!-- H-5: font-scale runs before paint, so NO defer. -->
+    <script src="subscriptionFontScale.js"></script>
 </head>
 <body>
     <!-- Header will be injected by Header.js -->
@@ -131,146 +131,10 @@
     <script src="../../lib/auth_db/shared/utils/offlineHandler.js"></script>
     <script src="../../lib/auth_db/shared/header/header.js"></script>
     <script src="../../lib/payments_app/payments/controllers/upgradeController.js?v=2.1.0-checkout-endpoint-fix"></script>
-    
-    <script>
-        // Verify all required services are loaded
-        console.log('[subscription.html] Checking required services after script load...');
-        console.log('[subscription.html] Services check:', {
-            hasSupabaseConfig: !!window.SupabaseConfig,
-            hasAuthService: !!window.AuthService,
-            hasDatabaseService: !!window.DatabaseService,
-            hasSubscriptionService: !!window.SubscriptionService,
-            hasStripeService: !!window.StripeService,
-            hasStripeConfig: !!window.StripeConfig,
-            hasHeader: !!window.Header,
-            hasUpgradeController: !!window.UpgradeController
-        });
-        
-        // Check for script loading errors
-        window.addEventListener('error', function(e) {
-            console.log('[subscription.html] Global error event:', {
-                message: e.message,
-                filename: e.filename,
-                lineno: e.lineno,
-                colno: e.colno,
-                error: e.error,
-                isStripeService: e.filename && e.filename.includes('StripeService')
-            });
-            if (e.filename && e.filename.includes('StripeService')) {
-                console.error('[subscription.html] ⚠️ StripeService script loading error detected:', {
-                    message: e.message,
-                    filename: e.filename,
-                    lineno: e.lineno,
-                    colno: e.colno,
-                    error: e.error
-                });
-            }
-        }, true);
-        
-        // Check for resource loading errors (network errors)
-        window.addEventListener('error', function(e) {
-            const target = e.target;
-            if (target && target.tagName === 'SCRIPT' && target.src && target.src.includes('StripeService')) {
-                console.error('[subscription.html] ⚠️ StripeService script resource loading error:', {
-                    src: target.src,
-                    error: e.error,
-                    type: target.type
-                });
-            }
-        }, true);
-        
-        // Verify script tags after a delay
-        setTimeout(function() {
-            const stripeServiceScript = document.querySelector('script[src*="StripeService"]');
-            if (stripeServiceScript) {
-                console.log('[subscription.html] StripeService script tag found:', {
-                    src: stripeServiceScript.src,
-                    async: stripeServiceScript.async,
-                    defer: stripeServiceScript.defer,
-                    type: stripeServiceScript.type
-                });
-                
-                // Try to manually check if script loaded
-                stripeServiceScript.addEventListener('load', function() {
-                    console.log('[subscription.html] ✅ StripeService script load event fired');
-                    console.log('[subscription.html] StripeService available after load event:', !!window.StripeService);
-                });
-                
-                stripeServiceScript.addEventListener('error', function(e) {
-                    console.error('[subscription.html] ❌ StripeService script error event fired:', e);
-                });
-            } else {
-                console.error('[subscription.html] ❌ StripeService script tag not found in DOM');
-            }
-        }, 100);
-        
-        // Initialize header
-        if (window.Header) {
-            window.Header.init();
-        } else {
-            console.warn('[subscription.html] Header not available');
-        }
-        
-        // Initialize upgrade page (async to wait for payments init)
-        (async function() {
-            // Wait for payments module initialization before initializing UpgradeController
-            if (window.waitForPaymentsInit) {
-                try {
-                    await window.waitForPaymentsInit();
-                } catch (error) {
-                    console.error('[subscription.html] Error waiting for payments init:', error);
-                }
-            }
-            
-            if (window.UpgradeController) {
-                window.UpgradeController.init();
-            } else {
-                console.warn('[subscription.html] UpgradeController not available');
-            }
-        })();
-        
-        // Final check after a short delay
-        setTimeout(function() {
-            console.log('[subscription.html] Final services check after delay:', {
-                hasStripeService: !!window.StripeService,
-                stripeServiceType: typeof window.StripeService,
-                hasListInvoices: !!(window.StripeService && typeof window.StripeService.listInvoices === 'function')
-            });
-            
-            // If StripeService still not available, try to manually verify the script URL
-            if (!window.StripeService) {
-                console.warn('[subscription.html] ⚠️ StripeService still not available after delay');
-                const stripeServiceScript = document.querySelector('script[src*="StripeService"]');
-                if (stripeServiceScript) {
-                    const scriptUrl = stripeServiceScript.src;
-                    console.log('[subscription.html] Attempting to manually verify script URL:', scriptUrl);
-                    
-                    // Try to fetch the script to see if it's accessible
-                    fetch(scriptUrl)
-                        .then(response => {
-                            console.log('[subscription.html] Script fetch response:', {
-                                status: response.status,
-                                statusText: response.statusText,
-                                ok: response.ok,
-                                contentType: response.headers.get('content-type')
-                            });
-                            if (!response.ok) {
-                                console.error('[subscription.html] ❌ Script URL returned error status:', response.status);
-                            }
-                            return response.text();
-                        })
-                        .then(text => {
-                            console.log('[subscription.html] Script content preview (first 200 chars):', text.substring(0, 200));
-                            console.log('[subscription.html] Script contains StripeService definition:', text.includes('const StripeService'));
-                            console.log('[subscription.html] Script contains window.StripeService:', text.includes('window.StripeService'));
-                        })
-                        .catch(error => {
-                            console.error('[subscription.html] ❌ Error fetching script:', error);
-                        });
-                }
-            }
-        }, 1000);
-    </script>
+
+    <!-- H-5: page bootstrap + diagnostics externalized; defer keeps it after the
+         synchronous controller scripts loaded above (original parse-time order). -->
+    <script src="subscriptionPageInit.js" defer></script>
 </body>
 </html>
 

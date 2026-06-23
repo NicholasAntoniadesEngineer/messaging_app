@@ -3,22 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Content-Security-Policy (SM-19): restricts script/connect origins. connect-src blocks
-         exfiltration to arbitrary hosts (defense-in-depth behind output escaping). 'unsafe-inline'
-         for scripts is a known gap pending removal of inline handlers/blocks. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <!-- Content-Security-Policy (SM-19 / H-5): restricts script/connect origins. connect-src blocks
+         exfiltration to arbitrary hosts. H-5: `script-src` no longer allows 'unsafe-inline' — all
+         inline <script> blocks and inline on* handlers have been moved to external files
+         (messengerFontScale.js / messengerPageInit.js) + addEventListener / delegated wiring in
+         messengerController.js. frame-ancestors 'none' added (clickjacking defense; note meta-CSP
+         frame-ancestors is ignored by spec, so this is belt-and-suspenders pending a real header).
+         style-src keeps 'unsafe-inline' (inline style= attributes / <style> blocks remain). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com; frame-src https://js.stripe.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>Secure Messenger</title>
     <link rel="stylesheet" href="../../lib/auth_db/shared/vendor/font-awesome/css/all.min.css">
     <link rel="stylesheet" href="../../lib/auth_db/shared/styles/main-compiled.css">
     <link rel="stylesheet" href="../../lib/auth_db/shared/styles/dark-theme.css?v=2">
+    <style>
+        /* H-5: hover effects formerly wired via inline onmouseover/onmouseout
+           handlers, moved to CSS so script-src can drop 'unsafe-inline'. */
+        #back-to-conversations:hover { color: var(--color-action) !important; }
+        .message-attachment-clickable:hover { background: rgba(0,0,0,0.25) !important; }
+    </style>
     <script src="../../lib/auth_db/shared/vendor/supabase/supabase.min.js"></script>
-    <script>
-        (function() {
-            var m = { 'very-small': 13, small: 14, medium: 16, large: 18, 'very-large': 20 };
-            var s = localStorage.getItem('secure_messenger_fontScale') || 'medium';
-            document.documentElement.style.fontSize = (m[s] || 16) + 'px';
-        })();
-    </script>
+    <!-- H-5: early font-scale bootstrap (was an inline <script>) — no defer so it runs before paint -->
+    <script src="messengerFontScale.js"></script>
 </head>
 <body>
     <!-- Header will be injected by Header.js -->
@@ -37,7 +42,7 @@
             <div id="message-thread-container" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); padding: var(--space-4); background: var(--color-bg-card); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); flex-wrap: wrap; gap: var(--space-3);">
                     <div style="display: flex; align-items: center; gap: var(--space-3); flex: 1 1 auto; min-width: 0;">
-                        <button id="back-to-conversations" style="background: none; border: none; color: var(--color-text-secondary); cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-lg); transition: color var(--duration-fast) var(--ease-default);" onmouseover="this.style.color='var(--color-action)'" onmouseout="this.style.color='var(--color-text-secondary)'">
+                        <button id="back-to-conversations" style="background: none; border: none; color: var(--color-text-secondary); cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-lg); transition: color var(--duration-fast) var(--ease-default);">
                             <i class="fas fa-chevron-left"></i>
                         </button>
                         <h3 id="conversation-partner-name" style="margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); font-size: var(--text-base); font-weight: 600;"> </h3>
@@ -176,263 +181,14 @@
     <script src="../../lib/auth_db/shared/utils/offlineHandler.js"></script>
     
     <!-- Header Component -->
-    <script>
-        console.log('[MessengerPage] Loading Header.js script...');
-        const headerScriptStart = Date.now();
-    </script>
-    <script src="../../lib/auth_db/shared/header/header.js" onload="console.log('[MessengerPage] Header.js loaded in', Date.now() - headerScriptStart, 'ms'); console.log('[MessengerPage] window.Header after load:', typeof window.Header);" onerror="console.error('[MessengerPage] ERROR loading Header.js');"></script>
-    
+    <!-- H-5: inline onload/onerror diagnostics removed; wired in messengerPageInit.js via addEventListener -->
+    <script id="messenger-header-script" src="../../lib/auth_db/shared/header/header.js"></script>
+
     <!-- Messenger Controller -->
-    <script>
-        console.log('[MessengerPage] Loading messengerController.js script...');
-        const controllerScriptStart = Date.now();
-    </script>
-    <script src="../controllers/messengerController.js" onload="console.log('[MessengerPage] messengerController.js loaded in', Date.now() - controllerScriptStart, 'ms'); console.log('[MessengerPage] window.MessengerController after load:', typeof window.MessengerController);" onerror="console.error('[MessengerPage] ERROR loading messengerController.js');"></script>
-    <script>
-        // Wait for scripts to load with detailed logging
-        function waitFor(condition, name, timeout = 5000) {
-            return new Promise((resolve, reject) => {
-                const startTime = Date.now();
-                let checkCount = 0;
-                const check = () => {
-                    checkCount++;
-                    const elapsed = Date.now() - startTime;
-                    const isAvailable = condition();
-                    
-                    // Log every 10 checks (every second) or on first check
-                    if (checkCount === 1 || checkCount % 10 === 0) {
-                        console.log(`[MessengerPage] Waiting for ${name}... (check ${checkCount}, ${elapsed}ms elapsed)`);
-                        console.log(`[MessengerPage] Current window state:`, {
-                            hasHeader: typeof window.Header !== 'undefined',
-                            hasMessengerController: typeof window.MessengerController !== 'undefined',
-                            headerType: typeof window.Header,
-                            messengerControllerType: typeof window.MessengerController,
-                            windowKeys: Object.keys(window).filter(k => k.includes('Header') || k.includes('Messenger'))
-                        });
-                    }
-                    
-                    if (isAvailable) {
-                        const totalTime = Date.now() - startTime;
-                        console.log(`[MessengerPage] ✅ ${name} is now available after ${totalTime}ms (${checkCount} checks)`);
-                        resolve();
-                    } else if (elapsed > timeout) {
-                        const totalTime = Date.now() - startTime;
-                        console.error(`[MessengerPage] ❌ Timeout waiting for ${name} after ${totalTime}ms (${checkCount} checks)`);
-                        console.error(`[MessengerPage] Final window state:`, {
-                            hasHeader: typeof window.Header !== 'undefined',
-                            hasMessengerController: typeof window.MessengerController !== 'undefined',
-                            headerType: typeof window.Header,
-                            messengerControllerType: typeof window.MessengerController,
-                            allWindowKeys: Object.keys(window).slice(0, 50) // First 50 keys for debugging
-                        });
-                        reject(new Error(`Timeout waiting for ${name} after ${totalTime}ms`));
-                    } else {
-                        setTimeout(check, 100);
-                    }
-                };
-                check();
-            });
-        }
+    <script id="messenger-controller-script" src="../controllers/messengerController.js"></script>
 
-        // Log script loading progress
-        document.addEventListener('readystatechange', () => {
-            console.log('[MessengerPage] Document readyState changed to:', document.readyState);
-            console.log('[MessengerPage] Window state at readyState change:', {
-                hasHeader: typeof window.Header !== 'undefined',
-                hasMessengerController: typeof window.MessengerController !== 'undefined',
-                headerType: typeof window.Header,
-                messengerControllerType: typeof window.MessengerController
-            });
-        });
-
-        // Log immediately when this script executes
-        console.log('[MessengerPage] ========== INITIALIZATION SCRIPT EXECUTING ==========');
-        console.log('[MessengerPage] Current readyState:', document.readyState);
-        console.log('[MessengerPage] Window state at script execution:', {
-            hasHeader: typeof window.Header !== 'undefined',
-            hasMessengerController: typeof window.MessengerController !== 'undefined',
-            headerType: typeof window.Header,
-            messengerControllerType: typeof window.MessengerController,
-            allWindowKeys: Object.keys(window).filter(k => k.includes('Header') || k.includes('Messenger') || k.includes('Database') || k.includes('Auth'))
-        });
-
-        document.addEventListener('DOMContentLoaded', async () => {
-            console.log('[MessengerPage] ========== DOMContentLoaded FIRED ==========');
-            console.log('[MessengerPage] Document ready state:', document.readyState);
-            console.log('[MessengerPage] Script loading status:', {
-                totalScripts: document.scripts.length,
-                loadedScripts: Array.from(document.scripts).map(s => ({
-                    src: s.src || 'inline',
-                    readyState: s.readyState,
-                    async: s.async,
-                    defer: s.defer
-                }))
-            });
-            console.log('[MessengerPage] Initial window state check:', {
-                hasHeader: typeof window.Header !== 'undefined',
-                hasMessengerController: typeof window.MessengerController !== 'undefined',
-                headerType: typeof window.Header,
-                messengerControllerType: typeof window.MessengerController,
-                headerConstructor: window.Header ? window.Header.constructor.name : 'N/A',
-                headerMethods: window.Header ? Object.getOwnPropertyNames(window.Header).filter(n => typeof window.Header[n] === 'function') : []
-            });
-            
-            // Check if all scripts have loaded
-            const allScriptsLoaded = Array.from(document.scripts).every(s => {
-                return !s.src || s.readyState === 'complete' || s.readyState === 'loaded';
-            });
-            console.log('[MessengerPage] All scripts loaded check:', {
-                allLoaded: allScriptsLoaded,
-                scriptStates: Array.from(document.scripts).map(s => ({
-                    src: s.src ? s.src.split('/').pop() : 'inline',
-                    readyState: s.readyState
-                }))
-            });
-
-            try {
-                // SM-45: enforce authentication (and the subscription/business gate) BEFORE
-                // initializing the UI. AuthGuard.checkAuth() validates the session server-side
-                // and redirects to the sign-in page if the user is not authenticated.
-                if (window.AuthGuard && typeof window.AuthGuard.checkAuth === 'function') {
-                    const authed = await window.AuthGuard.checkAuth();
-                    if (!authed) {
-                        console.log('[MessengerPage] Not authenticated — AuthGuard is redirecting.');
-                        return;
-                    }
-                } else {
-                    console.error('[MessengerPage] AuthGuard unavailable; refusing to load messenger.');
-                    window.location.href = '../../auth/views/auth.html';
-                    return;
-                }
-
-                console.log('[MessengerPage] Step 1: Waiting for Header to be available...');
-                const headerWaitStart = Date.now();
-                await waitFor(() => typeof window.Header !== 'undefined', 'Header', 10000);
-                const headerWaitTime = Date.now() - headerWaitStart;
-                console.log(`[MessengerPage] Header wait completed in ${headerWaitTime}ms`);
-                
-                console.log('[MessengerPage] Step 2: Checking Header availability and initializing...');
-                console.log('[MessengerPage] Header object:', {
-                    exists: window.Header !== undefined,
-                    type: typeof window.Header,
-                    hasInit: window.Header && typeof window.Header.init === 'function',
-                    hasStaticInit: window.Header && typeof window.Header.init === 'function',
-                    constructor: window.Header ? window.Header.constructor.name : 'N/A'
-                });
-                
-                // Initialize Header first (it may have already auto-initialized, but init() is idempotent)
-                if (window.Header && typeof window.Header.init === 'function') {
-                    console.log('[MessengerPage] Calling Header.init()...');
-                    const headerInitStart = Date.now();
-                    await window.Header.init();
-                    const headerInitTime = Date.now() - headerInitStart;
-                    console.log(`[MessengerPage] ✅ Header.init() completed in ${headerInitTime}ms`);
-                } else {
-                    console.warn('[MessengerPage] ⚠️ Header.init() is not available:', {
-                        hasHeader: window.Header !== undefined,
-                        headerType: typeof window.Header,
-                        hasInitMethod: window.Header && typeof window.Header.init
-                    });
-                }
-
-                console.log('[MessengerPage] Step 4: Waiting for MessengerController to be available...');
-                const controllerWaitStart = Date.now();
-                await waitFor(() => typeof window.MessengerController !== 'undefined', 'MessengerController', 10000);
-                const controllerWaitTime = Date.now() - controllerWaitStart;
-                console.log(`[MessengerPage] MessengerController wait completed in ${controllerWaitTime}ms`);
-
-                console.log('[MessengerPage] Step 5: Checking MessengerController availability and initializing...');
-                console.log('[MessengerPage] MessengerController object:', {
-                    exists: window.MessengerController !== undefined,
-                    type: typeof window.MessengerController,
-                    hasInit: window.MessengerController && typeof window.MessengerController.init === 'function'
-                });
-
-                // Initialize MessengerController
-                if (window.MessengerController && typeof window.MessengerController.init === 'function') {
-                    console.log('[MessengerPage] Calling MessengerController.init()...');
-                    const controllerInitStart = Date.now();
-                    await window.MessengerController.init();
-                    const controllerInitTime = Date.now() - controllerInitStart;
-                    console.log(`[MessengerPage] ✅ MessengerController.init() completed in ${controllerInitTime}ms`);
-
-                    // Set up periodic key rotation check (every 5 minutes)
-                    // This checks if YOUR keys need rotation based on the configured interval
-                    // Other user's key rotations are handled transparently via epoch-based decryption
-                    const ROTATION_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
-                    let lastRotationCheck = 0;
-
-                    const checkKeyRotation = async () => {
-                        const now = Date.now();
-                        // Throttle: only check if 5 minutes have passed since last check
-                        if (now - lastRotationCheck < ROTATION_CHECK_INTERVAL) {
-                            return;
-                        }
-                        lastRotationCheck = now;
-
-                        try {
-                            // Check if EncryptionModule is initialized
-                            if (!window.EncryptionModule?.isInitialized?.()) {
-                                return; // Skip rotation check if module not initialized
-                            }
-
-                            const facade = window.getEncryptionFacade?.();
-                            if (!facade?.checkAndRotateIfNeeded) return;
-
-                            const result = await facade.checkAndRotateIfNeeded();
-                            if (result.rotated) {
-                                console.log(`[MessengerPage] Auto-rotated keys to epoch ${result.newEpoch}`);
-                            }
-                        } catch (error) {
-                            console.warn('[MessengerPage] Key rotation check failed:', error);
-                        }
-                    };
-
-                    // Check rotation on page load (already done in EncryptionModule, but also do it here)
-                    checkKeyRotation();
-
-                    // Set up periodic check while page is open
-                    setInterval(checkKeyRotation, ROTATION_CHECK_INTERVAL);
-
-                    // Also check on message receive (throttled by the function above)
-                    const originalSubscribe = window.MessagingService?.subscribeToMessages;
-                    if (originalSubscribe) {
-                        window.MessagingService.subscribeToMessages = async function(userId, callback) {
-                            const wrappedCallback = (payload) => {
-                                // Check rotation on new message (throttled)
-                                checkKeyRotation();
-                                // Call original callback
-                                if (callback) callback(payload);
-                            };
-                            return originalSubscribe.call(this, userId, wrappedCallback);
-                        };
-                    }
-
-                    console.log('[MessengerPage] ✅ Key rotation monitoring enabled (checks every 5 min)');
-                    console.log('[MessengerPage] ========== INITIALIZATION COMPLETE ==========');
-                } else {
-                    console.error('[MessengerPage] ❌ MessengerController.init() is not available:', {
-                        hasController: window.MessengerController !== undefined,
-                        controllerType: typeof window.MessengerController,
-                        hasInitMethod: window.MessengerController && typeof window.MessengerController.init
-                    });
-                    throw new Error('MessengerController.init() is not available');
-                }
-            } catch (error) {
-                console.error('[MessengerPage] ========== INITIALIZATION ERROR ==========');
-                console.error('[MessengerPage] Error type:', error.constructor.name);
-                console.error('[MessengerPage] Error message:', error.message);
-                console.error('[MessengerPage] Error stack:', error.stack);
-                console.error('[MessengerPage] Final window state at error:', {
-                    hasHeader: typeof window.Header !== 'undefined',
-                    hasMessengerController: typeof window.MessengerController !== 'undefined',
-                    headerType: typeof window.Header,
-                    messengerControllerType: typeof window.MessengerController
-                });
-                (function(){try{console.error('[init] failed:', typeof error!=='undefined'?error:'');}catch(_){}if(document.body){var b=document.createElement('div');b.setAttribute('role','alert');b.style.cssText='background:#7f1d1d;color:#fff;padding:12px 16px;text-align:center;font:14px sans-serif';b.textContent='Could not load the page. Check your connection and refresh.';document.body.prepend(b);}})();
-            }
-        });
-    </script>
+    <!-- H-5: page init (was a large inline <script>) moved to an external, deferred file -->
+    <script defer src="messengerPageInit.js"></script>
 </body>
 </html>
 

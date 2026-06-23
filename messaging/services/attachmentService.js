@@ -290,6 +290,129 @@ const AttachmentService = {
     },
 
     /**
+     * W3-4: generate the unguessable storage-path component using the project's
+     * CSPRNG seam (NOT Math.random). 8 hex-ish chars of base36 from random bytes.
+     * @returns {string}
+     */
+    _randomPathId() {
+        const bytes = window.CryptoPrimitivesService.randomBytes(8);
+        let s = '';
+        for (let i = 0; i < bytes.length; i++) {
+            s += bytes[i].toString(36).padStart(2, '0');
+        }
+        return s.substring(0, 10);
+    },
+
+    /**
+     * H-6: round a byte count UP to a coarse bucket so the server never sees the
+     * exact size. Granularity scales with magnitude (1KB up to 64KB, then 64KB up
+     * to 1MB, then 1MB). The EXACT size lives only in the encrypted metadata blob.
+     * @param {number} bytes
+     * @returns {number} coarse bucket (>= bytes)
+     */
+    _bucketFileSize(bytes) {
+        const n = (typeof bytes === 'number' && bytes > 0) ? bytes : 0;
+        let g;
+        if (n <= 64 * 1024) {
+            g = 1024;                 // <=64KB -> round to 1KB
+        } else if (n <= 1024 * 1024) {
+            g = 64 * 1024;            // <=1MB  -> round to 64KB
+        } else {
+            g = 1024 * 1024;          // >1MB   -> round to 1MB
+        }
+        return Math.max(g, Math.ceil(n / g) * g);
+    },
+
+    /**
+     * H-6: seal an attachment's metadata ({file_name, mime_type, file_size}) under
+     * the conversation's invariant, context-bound attachment KEK (W3-2). The blob is
+     * what replaces the former plaintext columns; the server only ever sees ciphertext.
+     * @param {{file_name:string, mime_type:string, file_size:number}} meta
+     * @param {number|string} conversationId
+     * @param {string} attachmentPath - storage_path (context binding)
+     * @returns {Promise<{encryptedMetadata:string, metadataNonce:string}>}
+     */
+    async _encryptMetadata(meta, conversationId, attachmentPath) {
+        const key = await window.KeyManagementService.getSessionKey(
+            conversationId, { attachmentPath }
+        );
+        if (!(key instanceof Uint8Array)) {
+            throw new Error('No attachment key available for metadata encryption');
+        }
+        const plaintext = window.CryptoPrimitivesService.encodeUTF8(JSON.stringify({
+            file_name: meta.file_name,
+            mime_type: meta.mime_type,
+            file_size: meta.file_size
+        }));
+        const { ciphertext, nonce } = window.CryptoPrimitivesService.encryptBytes(plaintext, key);
+        return {
+            encryptedMetadata: btoa(String.fromCharCode(...ciphertext)),
+            metadataNonce: btoa(String.fromCharCode(...nonce))
+        };
+    },
+
+    /**
+     * H-6: decrypt a metadata blob sealed by _encryptMetadata. Tries the bound KEK
+     * first; throws if it cannot authenticate (caller falls back to legacy columns).
+     * @param {string} encryptedMetadataB64
+     * @param {string} metadataNonceB64
+     * @param {number|string} conversationId
+     * @param {string} attachmentPath - storage_path (context binding)
+     * @returns {Promise<{file_name:string, mime_type:string, file_size:number}>}
+     */
+    async _decryptMetadata(encryptedMetadataB64, metadataNonceB64, conversationId, attachmentPath) {
+        const key = await window.KeyManagementService.getSessionKey(
+            conversationId, { attachmentPath }
+        );
+        if (!(key instanceof Uint8Array)) {
+            throw new Error('No attachment key available for metadata decryption');
+        }
+        const ciphertext = Uint8Array.from(atob(encryptedMetadataB64), c => c.charCodeAt(0));
+        const nonce = Uint8Array.from(atob(metadataNonceB64), c => c.charCodeAt(0));
+        const plaintext = window.CryptoPrimitivesService.decryptBytes(ciphertext, nonce, key);
+        const json = window.CryptoPrimitivesService.decodeUTF8
+            ? window.CryptoPrimitivesService.decodeUTF8(plaintext)
+            : new TextDecoder().decode(plaintext);
+        return JSON.parse(json);
+    },
+
+    /**
+     * H-6: resolve an attachment row's display metadata (fileName/mimeType/fileSize)
+     * from whatever is available, in priority order:
+     *   1) the encrypted_metadata blob (new H-6 rows) — the private path;
+     *   2) the legacy plaintext columns (pre-H-6 rows) — back-compat;
+     *   3) a neutral fallback + coarse bucket size — degrade gracefully.
+     * Never throws.
+     * @param {Object} att - attachment row (DB shape)
+     * @returns {Promise<{fileName:string, mimeType:string, fileSize:number}>}
+     */
+    async _resolveMetadata(att) {
+        if (att && att.encrypted_metadata && att.metadata_nonce) {
+            try {
+                const m = await this._decryptMetadata(
+                    att.encrypted_metadata,
+                    att.metadata_nonce,
+                    att.conversation_id,
+                    att.storage_path
+                );
+                return {
+                    fileName: m.file_name || 'Attachment',
+                    mimeType: m.mime_type || 'application/octet-stream',
+                    fileSize: (typeof m.file_size === 'number') ? m.file_size : (att.file_size_bucket || 0)
+                };
+            } catch (e) {
+                console.warn('[AttachmentService] metadata decrypt failed, falling back:', e?.message);
+            }
+        }
+        // Legacy plaintext columns (pre-H-6) or graceful fallback.
+        return {
+            fileName: att?.file_name || 'Attachment',
+            mimeType: att?.mime_type || 'application/octet-stream',
+            fileSize: (typeof att?.file_size === 'number' ? att.file_size : null) ?? att?.file_size_bucket ?? 0
+        };
+    },
+
+    /**
      * Encrypt a file using XSalsa20-Poly1305
      * @param {ArrayBuffer} fileData - File data to encrypt
      * @param {Uint8Array} key - 32-byte encryption key
@@ -314,12 +437,20 @@ const AttachmentService = {
     },
 
     /**
-     * Encrypt the file key with the conversation session key
+     * Encrypt the file key with the conversation attachment KEK.
+     *
+     * W3-2: the KEK is derived from the conversation's INVARIANT attachment root
+     * (AK0) — NOT the advancing ratchet root — and is BOUND to this attachment via
+     * its storage path (folded into the HKDF info inside KeyManagementService). This
+     * makes the wrap ratchet-invariant (still decryptable after any number of DH
+     * ratchet steps) and non-transferable to another attachment row.
+     *
      * @param {Uint8Array} fileKey - The file's encryption key
      * @param {number|string} conversationId - Conversation ID
+     * @param {string} attachmentPath - The attachment's storage_path (context binding)
      * @returns {Promise<{encryptedKey: string, nonce: string}>}
      */
-    async _encryptFileKey(fileKey, conversationId) {
+    async _encryptFileKey(fileKey, conversationId, attachmentPath) {
         console.log('[AttachmentService] _encryptFileKey: Getting session key for conversation', conversationId);
 
         // Validate inputs
@@ -329,9 +460,14 @@ const AttachmentService = {
         if (!conversationId) {
             throw new Error('Conversation ID is required');
         }
+        if (!attachmentPath) {
+            throw new Error('Attachment storage path is required for key binding');
+        }
 
-        // Get session key for conversation
-        const sessionKey = await window.KeyManagementService.getSessionKey(conversationId);
+        // W3-2: get the invariant, context-bound attachment KEK for this row.
+        const sessionKey = await window.KeyManagementService.getSessionKey(
+            conversationId, { attachmentPath }
+        );
         if (!sessionKey) {
             console.error('[AttachmentService] _encryptFileKey: No session key returned for conversation', conversationId);
             throw new Error('No session key available for conversation - ensure encryption is set up');
@@ -355,35 +491,50 @@ const AttachmentService = {
     },
 
     /**
-     * Decrypt the file key using conversation session key
+     * Decrypt the file key using the conversation attachment KEK.
+     *
+     * W3-2 + BACK-COMPAT: new rows are wrapped under the invariant, context-bound
+     * KEK (AK0 + storage path). Pre-W3-2 rows were wrapped under the legacy
+     * RK-rooted, unbound key. We therefore try the bound key FIRST and, only if that
+     * authentication fails, fall back to the legacy key — so both old and new
+     * attachments decrypt. Because the bound key is ratchet-invariant, the new path
+     * no longer breaks after a DH-ratchet step (the original W3-2 defect).
+     *
      * @param {string} encryptedKeyBase64 - Base64 encrypted file key
      * @param {string} nonceBase64 - Base64 nonce
      * @param {number|string} conversationId - Conversation ID
+     * @param {string} attachmentPath - The attachment's storage_path (context binding)
      * @returns {Promise<Uint8Array>} Decrypted file key
      */
-    async _decryptFileKey(encryptedKeyBase64, nonceBase64, conversationId) {
+    async _decryptFileKey(encryptedKeyBase64, nonceBase64, conversationId, attachmentPath) {
         console.log('[AttachmentService] _decryptFileKey: Getting session key for conversation', conversationId);
 
-        // Get session key
-        const sessionKey = await window.KeyManagementService.getSessionKey(conversationId);
-        if (!sessionKey) {
-            console.error('[AttachmentService] _decryptFileKey: No session key for conversation', conversationId);
-            throw new Error('No session key available for conversation');
-        }
-
-        if (!(sessionKey instanceof Uint8Array)) {
-            console.error('[AttachmentService] _decryptFileKey: Session key is not Uint8Array');
-            throw new Error('Invalid session key type');
-        }
-
-        // Decode from base64
+        // Decode from base64 once.
         const ciphertext = Uint8Array.from(atob(encryptedKeyBase64), c => c.charCodeAt(0));
         const nonce = Uint8Array.from(atob(nonceBase64), c => c.charCodeAt(0));
 
-        console.log('[AttachmentService] _decryptFileKey: Decrypting file key');
+        // 1) W3-2 path: invariant, context-bound KEK (requires a storage path).
+        if (attachmentPath) {
+            const boundKey = await window.KeyManagementService.getSessionKey(
+                conversationId, { attachmentPath }
+            );
+            if (boundKey instanceof Uint8Array) {
+                try {
+                    return window.CryptoPrimitivesService.decryptBytes(ciphertext, nonce, boundKey);
+                } catch (e) {
+                    // Not wrapped under the bound key (e.g. a pre-W3-2 row) — fall back.
+                    console.log('[AttachmentService] _decryptFileKey: bound key failed, trying legacy key');
+                }
+            }
+        }
 
-        // Decrypt using decryptBytes (for binary data)
-        return window.CryptoPrimitivesService.decryptBytes(ciphertext, nonce, sessionKey);
+        // 2) Legacy/back-compat path: original RK-rooted, unbound key (no context).
+        const legacyKey = await window.KeyManagementService.getSessionKey(conversationId);
+        if (!(legacyKey instanceof Uint8Array)) {
+            console.error('[AttachmentService] _decryptFileKey: No session key for conversation', conversationId);
+            throw new Error('No session key available for conversation');
+        }
+        return window.CryptoPrimitivesService.decryptBytes(ciphertext, nonce, legacyKey);
     },
 
     /**
@@ -436,15 +587,28 @@ const AttachmentService = {
             dataWithNonce.set(nonce, 0);
             dataWithNonce.set(ciphertext, 24);
 
-            console.log('[AttachmentService] uploadAttachment: Encrypting file key with session key');
-
-            // Encrypt file key with conversation session key
-            const { encryptedKey, nonce: keyNonce } = await this._encryptFileKey(fileKey, conversationId);
-
-            // Generate unique storage path
+            // Generate unique storage path FIRST — it is the context the attachment
+            // KEK and the metadata blob are bound to (W3-2). Use the CSPRNG seam, not
+            // Math.random (W3-4), for the unguessable path component.
             const timestamp = Date.now();
-            const randomId = Math.random().toString(36).substring(2, 10);
+            const randomId = this._randomPathId();
             const storagePath = `${conversationId}/${timestamp}-${randomId}`;
+
+            console.log('[AttachmentService] uploadAttachment: Encrypting file key with attachment KEK');
+
+            // W3-2: wrap the file key under the invariant, context-bound attachment KEK.
+            const { encryptedKey, nonce: keyNonce } = await this._encryptFileKey(
+                fileKey, conversationId, storagePath
+            );
+
+            // H-6: seal file_name + mime_type + EXACT file_size into a client-encrypted
+            // metadata blob (same invariant, context-bound KEK). The plaintext columns
+            // are no longer written; the server only ever sees a COARSE size bucket.
+            const { encryptedMetadata, metadataNonce } = await this._encryptMetadata(
+                { file_name: file.name, mime_type: file.type, file_size: file.size },
+                conversationId, storagePath
+            );
+            const fileSizeBucket = this._bucketFileSize(file.size);
 
             // Upload encrypted file
             const encryptedBlob = new Blob([dataWithNonce], { type: 'application/octet-stream' });
@@ -461,14 +625,17 @@ const AttachmentService = {
                 throw new Error(`Upload failed: ${uploadError.message || 'Unknown error'}`);
             }
 
-            // Create attachment record in database
+            // Create attachment record in database.
+            // H-6: NO plaintext file_name / mime_type / exact file_size. Only the
+            // client-encrypted metadata blob and a coarse size bucket are stored, so a
+            // curious server learns neither the filename/type nor the exact byte count.
             const attachmentRecord = {
                 message_id: messageId,
                 conversation_id: conversationId,
                 uploader_id: userId,
-                file_name: file.name,
-                file_size: file.size,
-                mime_type: file.type,
+                file_size_bucket: fileSizeBucket,
+                encrypted_metadata: encryptedMetadata,
+                metadata_nonce: metadataNonce,
                 storage_path: storagePath,
                 encrypted_file_key: encryptedKey,
                 file_key_nonce: keyNonce
@@ -488,13 +655,15 @@ const AttachmentService = {
 
             console.log('[AttachmentService] ✓ Uploaded:', file.name, '(' + this.formatFileSize(file.size) + ')');
 
+            // H-6: the plaintext metadata is no longer stored, so surface the values
+            // the uploader already holds locally rather than reading them back.
             return {
                 success: true,
                 attachment: {
                     id: attachment.id,
-                    fileName: attachment.file_name,
-                    fileSize: attachment.file_size,
-                    mimeType: attachment.mime_type,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    mimeType: file.type,
                     expiresAt: attachment.expires_at
                 }
             };
@@ -547,18 +716,24 @@ const AttachmentService = {
                 throw new Error(`Download failed: ${downloadError.message}`);
             }
 
-            // Decrypt file
+            // Decrypt file. W3-2: pass storage_path so the file key is unwrapped under
+            // the context-bound, ratchet-invariant KEK (with legacy fallback inside).
             const encryptedData = new Uint8Array(await fileData.arrayBuffer());
             const fileKey = await this._decryptFileKey(
                 attachment.encrypted_file_key,
                 attachment.file_key_nonce,
-                attachment.conversation_id
+                attachment.conversation_id,
+                attachment.storage_path
             );
 
             // Extract nonce (first 24 bytes) and ciphertext
             const nonce = encryptedData.slice(0, 24);
             const ciphertext = encryptedData.slice(24);
             const decryptedData = this._decryptFile(ciphertext, nonce, fileKey);
+
+            // H-6: recover file_name + mime_type from the client-encrypted metadata
+            // blob (legacy rows fall back to any surviving plaintext columns).
+            const meta = await this._resolveMetadata(attachment);
 
             // Update download count via SECURITY DEFINER RPC. The message_attachments
             // table is immutable under the hardened RLS (no UPDATE policy), so the only
@@ -569,7 +744,7 @@ const AttachmentService = {
                 console.warn('[AttachmentService] download-count bump skipped:', e?.message);
             }
 
-            console.log('[AttachmentService] ✓ Downloaded:', attachment.file_name);
+            console.log('[AttachmentService] ✓ Downloaded:', meta.fileName);
 
             // SM-28: build the Blob with a SAFE content type. Risky types
             // (html/svg/xhtml/xml/js, by MIME or extension) are coerced to
@@ -581,9 +756,9 @@ const AttachmentService = {
             return {
                 success: true,
                 data: new Blob([decryptedData], {
-                    type: this._safeDownloadType(attachment.mime_type, attachment.file_name)
+                    type: this._safeDownloadType(meta.mimeType, meta.fileName)
                 }),
-                fileName: this._sanitizeFileName(attachment.file_name)
+                fileName: this._sanitizeFileName(meta.fileName)
             };
         } catch (error) {
             console.error('[AttachmentService] Download error:', error);
@@ -607,9 +782,13 @@ const AttachmentService = {
             const client = this._getClient();
             if (!client) return [];
 
+            // H-6: select the ENCRYPTED metadata blob + coarse size bucket plus the
+            // conversation/storage path needed to decrypt it. Legacy plaintext columns
+            // (file_name/file_size/mime_type) are also selected for back-compat reads
+            // of pre-H-6 rows; new rows leave them NULL.
             const { data, error } = await client
                 .from('message_attachments')
-                .select('id, file_name, file_size, mime_type, expires_at, created_at')
+                .select('id, conversation_id, storage_path, encrypted_metadata, metadata_nonce, file_size_bucket, file_name, file_size, mime_type, expires_at, created_at')
                 .eq('message_id', messageId)
                 .order('created_at', { ascending: true });
 
@@ -618,12 +797,34 @@ const AttachmentService = {
                 return [];
             }
 
+            // W2-1: the row `id` is server-controlled (the compromised-server threat
+            // model controls the JSON body regardless of the BIGSERIAL column type),
+            // and it reaches a JS/HTML render sink in the controller. Validate it at
+            // the *render* boundary, not only at query boundaries: coerce to a number
+            // and DROP any row whose id is not a positive integer. This guarantees the
+            // controller only ever sees a safe numeric id.
             // SM-29: flag expired attachments so the UI shows "expired" and
             // does not attempt a (refused) download. Server cleanup deletes them.
-            return (data || []).map(att => ({
-                ...att,
-                expired: this._isExpired(att.expires_at)
-            }));
+            const rows = (data || [])
+                .map(att => ({
+                    ...att,
+                    id: Number(att.id),
+                    expired: this._isExpired(att.expires_at)
+                }))
+                .filter(att => Number.isInteger(att.id) && att.id > 0);
+
+            // H-6: decrypt each row's metadata so the renderer keeps receiving
+            // fileName/mimeType/fileSize. Non-expired rows are decrypted (expired ones
+            // are not downloadable anyway). Decryption failures degrade gracefully to a
+            // neutral label + the coarse bucket size rather than throwing.
+            for (const att of rows) {
+                if (att.expired) continue;
+                const meta = await this._resolveMetadata(att);
+                att.fileName = meta.fileName;
+                att.mimeType = meta.mimeType;
+                att.fileSize = meta.fileSize;
+            }
+            return rows;
         } catch (error) {
             console.error('[AttachmentService] Error:', error);
             return [];
