@@ -275,7 +275,17 @@ const MessagingService = {
             // §5 ARCHIVE: now that the message id exists, archive the sender-side
             // per-message key so OUR own getMessages history re-render reads it from
             // the archive (we never decrypt our own SENDING chain via the ratchet).
-            if (encrypted._messageKey && typeof encryptionFacade.archiveSentMessageKey === 'function') {
+            // P0-5: the raw key stays INSIDE the facade — we no longer read it off the
+            // returned object (it is not surfaced there). archivePendingSentKey()
+            // consumes the facade's internal stash by message id.
+            if (typeof encryptionFacade.archivePendingSentKey === 'function') {
+                try {
+                    await encryptionFacade.archivePendingSentKey(conversationId, newMessage.id);
+                } catch (archiveErr) {
+                    console.warn('[MessagingService] Failed to archive sent message key:', archiveErr.message);
+                }
+            } else if (encrypted._messageKey && typeof encryptionFacade.archiveSentMessageKey === 'function') {
+                // Back-compat: older facade that still surfaces _messageKey.
                 try {
                     await encryptionFacade.archiveSentMessageKey(conversationId, newMessage.id, encrypted._messageKey);
                 } catch (archiveErr) {
@@ -325,7 +335,22 @@ const MessagingService = {
             }
         } catch (error) {
             console.error('[MessagingService] sendMessage error:', error);
-            return { success: false, message: null, error: error.message };
+            // Preserve a fail-closed identity-change error so the UI can surface the
+            // verify/accept notice instead of a generic send failure (P0-1/P0-2).
+            const isIdentityChange = error &&
+                (error.name === 'PeerIdentityChangedError' || error.code === 'PEER_IDENTITY_CHANGED');
+            return {
+                success: false,
+                message: null,
+                error: error.message,
+                errorCode: error && error.code,
+                peerIdentityChanged: isIdentityChange ? {
+                    userId: error.userId,
+                    oldFingerprint: error.oldFingerprint,
+                    newFingerprint: error.newFingerprint,
+                    keyType: error.keyType
+                } : null
+            };
         }
     },
 

@@ -819,7 +819,21 @@ const MessengerController = {
                     }
                 } catch (decryptError) {
                     console.error('[MessengerController] Failed to decrypt real-time message:', decryptError);
-                    content = '[Cannot decrypt message]';
+                    // P0-1/P0-2: a fail-closed identity change is NOT a generic
+                    // decrypt failure — surface the verify/accept notice.
+                    if (this._isPeerIdentityChanged(decryptError)) {
+                        // Inbound realtime message: the sender IS the peer whose
+                        // identity changed. (decryptError.userId is also available.)
+                        const otherId = decryptError.userId || newMessage.sender_id;
+                        this._showIdentityChangeNotice(otherId, {
+                            oldFingerprint: decryptError.oldFingerprint,
+                            newFingerprint: decryptError.newFingerprint,
+                            keyType: decryptError.keyType
+                        });
+                        content = '⚠ Identity changed — verify before continuing';
+                    } else {
+                        content = '[Cannot decrypt message]';
+                    }
                 }
             }
 
@@ -1187,6 +1201,121 @@ const MessengerController = {
     },
 
     /**
+     * P0-1/P0-2 UI hook: surface a NON-BLOCKING inline notice when a peer's pinned
+     * identity key has changed (fail-closed PeerIdentityChangedError). The notice
+     * carries an "Accept" action wired to acceptPeerIdentityChange() — to be used
+     * ONLY after the user verifies the safety number out-of-band. No blocking modal;
+     * the codebase favors inline DOM notices.
+     *
+     * @param {string} otherUserId - Peer whose identity changed (for accept + safety #)
+     * @param {Object} [detail]    - { oldFingerprint, newFingerprint, keyType }
+     */
+    _showIdentityChangeNotice(otherUserId, detail = {}) {
+        const container = document.getElementById('message-thread-container')
+            || document.getElementById('message-thread');
+        if (!container) return;
+
+        // De-dupe: one notice per peer at a time.
+        const existing = container.querySelector(`[data-identity-notice="${this._escapeHtml(otherUserId)}"]`);
+        if (existing) return;
+
+        const notice = document.createElement('div');
+        notice.className = 'identity-change-notice';
+        notice.setAttribute('data-identity-notice', otherUserId);
+        notice.setAttribute('role', 'alert');
+        notice.style.cssText = [
+            'background: var(--warning-bg, #fff3cd)',
+            'color: var(--warning-color, #856404)',
+            'border: 1px solid var(--warning-border, #ffeeba)',
+            'border-radius: 6px',
+            'padding: 10px 12px',
+            'margin: 8px 0',
+            'font-size: 0.9em',
+            'display: flex',
+            'align-items: center',
+            'justify-content: space-between',
+            'gap: 8px'
+        ].join(';');
+
+        const fpHint = detail.newFingerprint
+            ? ` (new key ${this._escapeHtml(String(detail.newFingerprint).slice(0, 16))}…)`
+            : '';
+        const msgSpan = document.createElement('span');
+        msgSpan.innerHTML = `⚠ Identity changed${fpHint} — verify before continuing.`;
+
+        const actions = document.createElement('span');
+        actions.style.cssText = 'display:flex; gap:6px; flex-shrink:0;';
+
+        const verifyBtn = document.createElement('button');
+        verifyBtn.type = 'button';
+        verifyBtn.className = 'btn-secondary';
+        verifyBtn.textContent = 'Safety number';
+        verifyBtn.addEventListener('click', async () => {
+            try {
+                const facade = window.EncryptionModule?.getFacade();
+                const safety = facade && facade.isSetUp()
+                    ? await facade.getSafetyNumber(otherUserId)
+                    : null;
+                alert(safety
+                    ? `Compare this safety number with your contact out-of-band before accepting:\n\n${safety}`
+                    : 'Safety number unavailable.');
+            } catch (e) {
+                alert('Could not load safety number: ' + e.message);
+            }
+        });
+
+        const acceptBtn = document.createElement('button');
+        acceptBtn.type = 'button';
+        acceptBtn.className = 'btn-action';
+        acceptBtn.textContent = 'Accept';
+        acceptBtn.addEventListener('click', async () => {
+            try {
+                const facade = window.EncryptionModule?.getFacade();
+                if (facade && typeof facade.acceptPeerIdentityChange === 'function') {
+                    await facade.acceptPeerIdentityChange(otherUserId);
+                }
+                notice.remove();
+                // Reload the thread now that the new identity is pinned.
+                if (this.currentConversationId) {
+                    await this.loadMessages(this.currentConversationId);
+                }
+            } catch (e) {
+                console.error('[MessengerController] acceptPeerIdentityChange failed:', e);
+                alert('Could not accept the new identity: ' + e.message);
+            }
+        });
+
+        const dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.className = 'btn-secondary';
+        dismissBtn.textContent = 'Dismiss';
+        dismissBtn.addEventListener('click', () => notice.remove());
+
+        actions.appendChild(verifyBtn);
+        actions.appendChild(acceptBtn);
+        actions.appendChild(dismissBtn);
+        notice.appendChild(msgSpan);
+        notice.appendChild(actions);
+
+        // Insert at the TOP of the thread container (above the messages).
+        container.insertBefore(notice, container.firstChild);
+    },
+
+    /**
+     * Detect a fail-closed peer-identity-change error in any shape (typed instance,
+     * plain Error carrying the code, or a flattened result.peerIdentityChanged).
+     * @param {Error|Object} err
+     * @returns {boolean}
+     */
+    _isPeerIdentityChanged(err) {
+        if (!err) return false;
+        return err.name === 'PeerIdentityChangedError'
+            || err.code === 'PEER_IDENTITY_CHANGED'
+            || err.errorCode === 'PEER_IDENTITY_CHANGED'
+            || !!err.peerIdentityChanged;
+    },
+
+    /**
      * Batch fetch user emails for multiple user IDs
      */
     async batchFetchUserEmails(userIds) {
@@ -1487,12 +1616,33 @@ const MessengerController = {
                     attachments: attachmentInfo ? [attachmentInfo] : []
                 };
                 await this.appendMessageToThread(messageForDisplay, conversation);
+            } else if (this._isPeerIdentityChanged(result)) {
+                // P0-1/P0-2: send was BLOCKED fail-closed because the peer's pinned
+                // identity changed. Do not alert() a generic error — surface the
+                // non-blocking verify/accept notice. The message input is preserved
+                // so the user can resend after accepting.
+                const pic = result.peerIdentityChanged || {};
+                const otherId = pic.userId || conversation.other_user_id;
+                this._showIdentityChangeNotice(otherId, {
+                    oldFingerprint: pic.oldFingerprint,
+                    newFingerprint: pic.newFingerprint,
+                    keyType: pic.keyType
+                });
             } else {
                 throw new Error(result.error || 'Failed to send message');
             }
         } catch (error) {
             console.error('[MessengerController] Error sending message:', error);
-            alert(`Error: ${error.message}`);
+            if (this._isPeerIdentityChanged(error)) {
+                const conv = this.conversations.find(c => c.id === this.currentConversationId);
+                this._showIdentityChangeNotice(error.userId || conv?.other_user_id, {
+                    oldFingerprint: error.oldFingerprint,
+                    newFingerprint: error.newFingerprint,
+                    keyType: error.keyType
+                });
+            } else {
+                alert(`Error: ${error.message}`);
+            }
         } finally {
             // Restore send button
             if (sendButton) {
