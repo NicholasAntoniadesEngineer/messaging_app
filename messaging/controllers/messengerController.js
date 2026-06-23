@@ -113,6 +113,19 @@ const MessengerController = {
                         await window.AuthService?.signOut();
                         return;
                     }
+
+                    // FORWARD SECRECY (S5): publish / refresh this user's X3DH prekey
+                    // bundle + replenish the one-time-prekey pool so peers can start
+                    // ratchet sessions with us while we are offline. Best-effort and
+                    // non-fatal: a publish hiccup must not block opening the messenger.
+                    try {
+                        const facade = window.EncryptionModule.getFacade && window.EncryptionModule.getFacade();
+                        if (facade && facade.isSetUp && facade.isSetUp() && typeof facade.publishPrekeys === 'function') {
+                            await facade.publishPrekeys();
+                        }
+                    } catch (prekeyErr) {
+                        console.warn('[MessengerController] publishPrekeys failed (non-fatal):', prekeyErr.message);
+                    }
                 } else {
                     console.error('[MessengerController] EncryptionModule not available');
                 }
@@ -770,16 +783,18 @@ const MessengerController = {
                             ? currentUserId
                             : conversation?.other_user_id;
 
+                        // REALTIME ARRIVAL (FORWARD_SECRECY_DESIGN §5/§6): advance the
+                        // live ratchet and MINT the per-message-key archive. We use the
+                        // shared MessagingService.buildEncryptedData mapper (single
+                        // column<->field source of truth) and pass liveAdvance:true so
+                        // this is the ONE ratchet-ordered decrypt; all later history
+                        // re-renders read the archive instead.
                         content = await encryptionFacade.decryptMessage(
                             conversationId,
-                            {
-                                ciphertext: newMessage.encrypted_content,
-                                nonce: newMessage.encryption_nonce,
-                                counter: newMessage.message_counter,
-                                epoch: newMessage.key_epoch || 0
-                            },
+                            window.MessagingService.buildEncryptedData(newMessage),
                             newMessage.sender_id,
-                            recipientId
+                            recipientId,
+                            { liveAdvance: true }
                         );
                     }
                 } catch (decryptError) {

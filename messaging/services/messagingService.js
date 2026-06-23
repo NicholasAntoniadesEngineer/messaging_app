@@ -54,6 +54,44 @@ const MessagingService = {
         return DatabaseConfigHelper.getTableName(this, tableKey);
     },
 
+    /**
+     * Map a raw `messages` row to the encryptedData object the encryption facade
+     * expects (FORWARD_SECRECY_DESIGN §4.4). Shared by the batch getMessages path
+     * here AND the realtime/controller path so the column<->field mapping can never
+     * drift between the two decrypt call sites. Pulls the Double Ratchet header
+     * (ratchet_pub/prev_chain_len/msg_num) and, when present, the X3DH first-message
+     * preamble (x3dh_*). msg.id is threaded through so the §5 per-message-key archive
+     * can be keyed/looked up by message id.
+     * @param {Object} msg - a raw messages row
+     * @returns {Object} encryptedData for facade.decryptMessage
+     */
+    buildEncryptedData(msg) {
+        const data = {
+            id: msg.id,
+            ciphertext: msg.encrypted_content,
+            nonce: msg.encryption_nonce,
+            // vestigial back-compat
+            counter: msg.message_counter,
+            epoch: msg.key_epoch || 0,
+            header: {
+                ratchet_pub: msg.ratchet_pub ?? null,
+                prev_chain_len: msg.prev_chain_len ?? null,
+                msg_num: msg.msg_num ?? null
+            }
+        };
+        // X3DH preamble present only on a bootstrap (first) message.
+        if (msg.x3dh_ik) {
+            data.x3dhPreamble = {
+                ikPub: msg.x3dh_ik,
+                ikSignPub: msg.x3dh_ik_sign ?? null,
+                ekPub: msg.x3dh_ek,
+                spkId: (msg.x3dh_spk_id ?? null),
+                opkId: (msg.x3dh_opk_id ?? null)
+            };
+        }
+        return data;
+    },
+
     _getEncryptionFacade() {
         if (this._encryptionFacade) {
             return this._encryptionFacade;
@@ -192,16 +230,32 @@ const MessagingService = {
                 throw new Error('Encryption is not enabled');
             }
 
-            // Encrypt
+            // Encrypt via the Double Ratchet (FORWARD_SECRECY_DESIGN §3/§5). The
+            // facade establishes the ratchet session (X3DH bootstrap) as needed and
+            // returns the ratchet header + (on message 0) the X3DH preamble.
             const encrypted = await encryptionFacade.encryptMessage(conversationId, content.trim(), recipientId);
+            const header = encrypted.header || {};
+            const pre = encrypted.x3dhPreamble || null;
             const messageData = {
                 conversation_id: conversationId,
                 sender_id: senderId,
                 recipient_id: recipientId,
                 encrypted_content: encrypted.ciphertext,
                 encryption_nonce: encrypted.nonce,
+                // Vestigial back-compat columns (kept nullable). message_counter now
+                // mirrors the ratchet msg_num; key_epoch is no longer load-bearing.
                 message_counter: encrypted.counter,
-                key_epoch: encrypted.epoch || 0,
+                key_epoch: 0,
+                // Double Ratchet header (FORWARD_SECRECY_DESIGN §4.4).
+                ratchet_pub: header.ratchet_pub ?? null,
+                prev_chain_len: header.prev_chain_len ?? null,
+                msg_num: header.msg_num ?? null,
+                // X3DH first-message preamble (NULL except on the bootstrap message).
+                x3dh_ik: pre ? pre.ikPub : null,
+                x3dh_ik_sign: pre ? pre.ikSignPub : null,
+                x3dh_ek: pre ? pre.ekPub : null,
+                x3dh_spk_id: pre ? (pre.spkId ?? null) : null,
+                x3dh_opk_id: pre ? (pre.opkId ?? null) : null,
                 is_encrypted: true,
                 read: false
             };
@@ -216,6 +270,17 @@ const MessagingService = {
             if (!newMessage?.id) {
                 console.error('[MessagingService] Message created but no ID returned');
                 return { success: false, message: null, error: 'Message created but ID not returned' };
+            }
+
+            // §5 ARCHIVE: now that the message id exists, archive the sender-side
+            // per-message key so OUR own getMessages history re-render reads it from
+            // the archive (we never decrypt our own SENDING chain via the ratchet).
+            if (encrypted._messageKey && typeof encryptionFacade.archiveSentMessageKey === 'function') {
+                try {
+                    await encryptionFacade.archiveSentMessageKey(conversationId, newMessage.id, encrypted._messageKey);
+                } catch (archiveErr) {
+                    console.warn('[MessagingService] Failed to archive sent message key:', archiveErr.message);
+                }
             }
 
             // Update conversation timestamp. Only last_message_at — updated_at is set by
@@ -372,16 +437,16 @@ const MessagingService = {
                     content = '[Message corrupted - missing encryption data]';
                 } else {
                     try {
+                        // §5 HISTORY RE-RENDER: ARCHIVE-ONLY. No liveAdvance flag, so
+                        // decryptMessage decrypts each message by per-message-key
+                        // archive lookup and NEVER advances the live ratchet — which
+                        // is what makes this newest-first parallel Promise.all safe.
                         content = await encryptionFacade.decryptMessage(
                             conversationId,
-                            {
-                                ciphertext: msg.encrypted_content,
-                                nonce: msg.encryption_nonce,
-                                counter: msg.message_counter,
-                                epoch: msg.key_epoch || 0
-                            },
+                            MessagingService.buildEncryptedData(msg),
                             msg.sender_id,
                             msg.recipient_id
+                            // (no options => batch/archive-only path)
                         );
                     } catch (err) {
                         // SM-48: do not log per-message metadata (id/counter/epoch) or raw
