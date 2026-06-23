@@ -588,6 +588,12 @@ CREATE POLICY messages_update_participant ON messages
         )
     );
 
+-- UNSEND: the sender may hard-delete their OWN message, removing it for BOTH parties
+-- (delete-for-everyone). Recipient's view drops it via the realtime DELETE event
+-- (messages already has REPLICA IDENTITY FULL so old.conversation_id is present).
+CREATE POLICY messages_delete_own ON messages
+    FOR DELETE USING (auth.uid() = sender_id);
+
 CREATE OR REPLACE FUNCTION update_messages_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -608,6 +614,7 @@ GRANT SELECT, INSERT ON messages TO authenticated;
 -- HARDENING: column-scoped UPDATE so a participant can mark messages read (clears
 -- unread counts) WITHOUT being able to alter encrypted_content / sender_id.
 GRANT UPDATE (read, read_at) ON messages TO authenticated;
+GRANT DELETE ON messages TO authenticated;
 GRANT USAGE, SELECT ON SEQUENCE messages_id_seq TO authenticated;
 
 -- ============================================================
