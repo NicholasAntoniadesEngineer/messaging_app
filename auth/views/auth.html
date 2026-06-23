@@ -88,13 +88,13 @@
 
                 <div class="form-group">
                     <label for="new-password" class="label">New Password</label>
-                    <input type="password" id="new-password" class="input" required minlength="8" autocomplete="new-password">
+                    <input type="password" id="new-password" class="input" required minlength="12" autocomplete="new-password">
                     <div class="form-error hidden" id="new-password-error"></div>
                 </div>
 
                 <div class="form-group">
                     <label for="new-password-confirm" class="label">Confirm New Password</label>
-                    <input type="password" id="new-password-confirm" class="input" required minlength="8" autocomplete="new-password">
+                    <input type="password" id="new-password-confirm" class="input" required minlength="12" autocomplete="new-password">
                     <div class="form-error hidden" id="new-password-confirm-error"></div>
                 </div>
 
@@ -155,13 +155,13 @@
 
                 <div class="form-group">
                     <label for="signup-password" class="label">Password</label>
-                    <input type="password" id="signup-password" name="password" class="input" required autocomplete="new-password" minlength="8">
+                    <input type="password" id="signup-password" name="password" class="input" required autocomplete="new-password" minlength="12">
                     <div class="form-error hidden" id="signup-password-error"></div>
                 </div>
 
                 <div class="form-group">
                     <label for="signup-password-confirm" class="label">Confirm Password</label>
-                    <input type="password" id="signup-password-confirm" name="password-confirm" class="input" required autocomplete="new-password" minlength="8">
+                    <input type="password" id="signup-password-confirm" name="password-confirm" class="input" required autocomplete="new-password" minlength="12">
                     <div class="form-error hidden" id="signup-password-confirm-error"></div>
                 </div>
 
@@ -789,8 +789,18 @@
                 return;
             }
 
-            if (password.length < 8) {
-                showError('signup-password-error', 'Password must be at least 8 characters');
+            // H-2: enforce the strong-password policy (length >= 12 + character
+            // classes) BEFORE creating the account / identity backup. Single
+            // source of truth: PasswordCryptoService.enforcePasswordStrength.
+            if (window.PasswordCryptoService && typeof window.PasswordCryptoService.enforcePasswordStrength === 'function') {
+                try {
+                    window.PasswordCryptoService.enforcePasswordStrength(password);
+                } catch (strengthError) {
+                    showError('signup-password-error', strengthError.message);
+                    return;
+                }
+            } else if (password.length < 12) {
+                showError('signup-password-error', 'Password must be at least 12 characters');
                 return;
             }
 
@@ -901,8 +911,18 @@
                 showError('new-password-error', 'Password is required');
                 return;
             }
-            if (newPassword.length < 8) {
-                showError('new-password-error', 'Password must be at least 8 characters');
+            // H-2: the new password re-encrypts the identity backup, so it must
+            // satisfy the strong-password policy (length >= 12 + character
+            // classes). Single source of truth: PasswordCryptoService.
+            if (window.PasswordCryptoService && typeof window.PasswordCryptoService.enforcePasswordStrength === 'function') {
+                try {
+                    window.PasswordCryptoService.enforcePasswordStrength(newPassword);
+                } catch (strengthError) {
+                    showError('new-password-error', strengthError.message);
+                    return;
+                }
+            } else if (newPassword.length < 12) {
+                showError('new-password-error', 'Password must be at least 12 characters');
                 return;
             }
             if (newPassword !== confirmPassword) {
