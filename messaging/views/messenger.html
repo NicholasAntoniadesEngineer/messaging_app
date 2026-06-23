@@ -427,7 +427,7 @@
                     headerType: typeof window.Header,
                     messengerControllerType: typeof window.MessengerController
                 });
-                alert('Failed to initialize the application. Please refresh the page or check your connection.');
+                (function(){try{console.error('[init] failed:', typeof error!=='undefined'?error:'');}catch(_){}if(document.body){var b=document.createElement('div');b.setAttribute('role','alert');b.style.cssText='background:#7f1d1d;color:#fff;padding:12px 16px;text-align:center;font:14px sans-serif';b.textContent='Could not load the page. Check your connection and refresh.';document.body.prepend(b);}})();
             }
         });
     </script>
