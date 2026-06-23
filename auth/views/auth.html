@@ -1073,9 +1073,9 @@
 
             try {
                 const userId = document.getElementById('recovery-key-restore-section').dataset.userId;
-                const recoveryKey = words.join(' ');
+                const recoveryKey = recoveryKeyText;
 
-                // Parse the recovery key from words to bytes
+                // Parse the dash-separated Base32 recovery code to bytes
                 const recoveryKeyBytes = window.PasswordCryptoService.parseRecoveryKey(recoveryKey);
 
                 console.log('[Auth] Restoring keys from recovery key...');
