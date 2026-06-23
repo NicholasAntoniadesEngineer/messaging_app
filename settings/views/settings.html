@@ -112,6 +112,9 @@
                 <div id="pairing-code-output" class="settings-status hidden" style="margin-top: var(--space-3);">
                     <p style="color: var(--text-secondary); font-size: 0.85rem;">On your other device: choose "Restore encryption keys" and enter this code:</p>
                     <pre id="pairing-code-value" style="font-size: 1.25rem; letter-spacing: 0.08em; user-select: all;"></pre>
+                    <div class="settings-actions" style="margin-top: var(--space-2);">
+                        <button id="copy-pairing-code" class="btn btn-secondary"><i class="fas fa-copy"></i> Copy code</button>
+                    </div>
                     <p id="pairing-code-expiry" style="color: var(--text-secondary); font-size: 0.75rem;"></p>
                 </div>
                 <div id="link-device-status" class="settings-status"></div>
@@ -254,6 +257,18 @@
                             linkBtn.innerHTML = orig;
                         }
                     });
+                    const copyBtn = document.getElementById('copy-pairing-code');
+                    if (copyBtn) {
+                        copyBtn.addEventListener('click', async () => {
+                            const code = document.getElementById('pairing-code-value').textContent;
+                            try {
+                                await navigator.clipboard.writeText(code);
+                                const t = copyBtn.innerHTML;
+                                copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                                setTimeout(() => { copyBtn.innerHTML = t; }, 1500);
+                            } catch (_) { /* clipboard blocked; the code is selectable */ }
+                        });
+                    }
                 }
 
                 console.log('[SettingsPage] Initialization complete!');
