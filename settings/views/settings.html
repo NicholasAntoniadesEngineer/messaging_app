@@ -102,6 +102,21 @@
                 <div id="security-status" class="settings-status"></div>
             </section>
 
+            <!-- Link a Device Card -->
+            <section class="settings-card form-section">
+                <h2 class="section-title"><i class="fas fa-link"></i> Link a device</h2>
+                <p style="color: var(--text-secondary);">Generate a one-time code to read your messages on another device. Enter it on the other device's "Restore encryption keys" screen. Valid for 5 minutes, single use.</p>
+                <div class="danger-actions">
+                    <button id="link-device-button" class="btn btn-primary"><i class="fas fa-key"></i> Generate pairing code</button>
+                </div>
+                <div id="pairing-code-output" class="settings-status hidden" style="margin-top: var(--space-3);">
+                    <p style="color: var(--text-secondary); font-size: 0.85rem;">On your other device: choose "Restore encryption keys" and enter this code:</p>
+                    <pre id="pairing-code-value" style="font-size: 1.25rem; letter-spacing: 0.08em; user-select: all;"></pre>
+                    <p id="pairing-code-expiry" style="color: var(--text-secondary); font-size: 0.75rem;"></p>
+                </div>
+                <div id="link-device-status" class="settings-status"></div>
+            </section>
+
             <!-- Danger Zone Card -->
             <section class="settings-card form-section">
                 <h2 class="section-title"><i class="fas fa-skull-crossbones"></i> Danger Zone</h2>
@@ -158,6 +173,7 @@
     <script src="../../encryption/services/historicalKeysService.js"></script>
     <script src="../../encryption/services/keyBackupService.js"></script>
     <script src="../../encryption/services/keyManagementService.js"></script>
+    <script src="../../messaging/services/devicePairingService.js"></script>
     <script src="../../encryption/facade/encryptionFacade.js"></script>
     <script src="../../encryption/facade/nullEncryptionFacade.js"></script>
     <script src="../../encryption/encryptionModule.js"></script>
@@ -208,6 +224,36 @@
                 if (window.SettingsController) {
                     await window.SettingsController.init();
                     console.log('[SettingsPage] SettingsController initialized');
+                }
+
+                // Link-a-device: generate a one-time pairing code for another device.
+                const linkBtn = document.getElementById('link-device-button');
+                if (linkBtn && window.DevicePairingService) {
+                    linkBtn.addEventListener('click', async () => {
+                        const out = document.getElementById('pairing-code-output');
+                        const val = document.getElementById('pairing-code-value');
+                        const exp = document.getElementById('pairing-code-expiry');
+                        const status = document.getElementById('link-device-status');
+                        status.textContent = '';
+                        const orig = linkBtn.innerHTML;
+                        linkBtn.disabled = true;
+                        linkBtn.textContent = 'Generating…';
+                        try {
+                            const r = await window.DevicePairingService.createPairingRequest();
+                            if (r && r.success) {
+                                val.textContent = r.code;
+                                exp.textContent = r.expiresAt ? ('Valid until ' + new Date(r.expiresAt).toLocaleTimeString()) : '';
+                                out.classList.remove('hidden');
+                            } else {
+                                status.textContent = (r && r.error) ? r.error : 'Could not generate a pairing code.';
+                            }
+                        } catch (e) {
+                            status.textContent = 'Could not generate a pairing code.';
+                        } finally {
+                            linkBtn.disabled = false;
+                            linkBtn.innerHTML = orig;
+                        }
+                    });
                 }
 
                 console.log('[SettingsPage] Initialization complete!');

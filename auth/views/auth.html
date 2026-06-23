@@ -109,7 +109,19 @@
             <!-- Recovery Key Restore Section (shown after password reset when old backup can't be decrypted) -->
             <div id="recovery-key-restore-section" class="auth-form hidden">
                 <h3 class="text-lg font-semibold mb-2">Restore Encryption Keys</h3>
-                <p class="text-sm text-slate-500 mb-4">Your password was reset. Enter your 24-word recovery key to restore your encrypted data.</p>
+                <p class="text-sm text-slate-500 mb-4">This device needs your encryption keys to read your data. Easiest: generate a one-time pairing code on a device you're already signed in on. Otherwise, use your recovery key.</p>
+
+                <!-- Preferred: pair from a device you're already signed in on -->
+                <div class="form-group">
+                    <label for="pairing-code-input" class="label">Pairing code (from your other device)</label>
+                    <input type="text" id="pairing-code-input" class="input" placeholder="e.g. ABCD-EFGH-IJKL-MNOP" autocomplete="off" autocapitalize="characters">
+                    <div class="form-error hidden" id="pairing-restore-error"></div>
+                    <div class="status-success hidden" id="pairing-restore-success"></div>
+                    <button type="button" class="btn btn-primary w-full mt-2" id="pair-device-btn">Pair this device</button>
+                    <p class="text-sm text-slate-500 mt-1" style="font-size: 0.75rem;">On a device you're already signed in on, open Settings → "Link a device" to get a code (valid 5 minutes).</p>
+                </div>
+
+                <div class="text-center my-3 text-sm text-slate-500">— or restore with your recovery key —</div>
 
                 <div class="form-group">
                     <label for="recovery-key-input" class="label">Recovery Key</label>
@@ -993,6 +1005,46 @@
                 showError('set-password-error', 'An unexpected error occurred.');
                 btn.disabled = false;
                 btn.textContent = 'Update Password';
+            }
+        });
+
+        // --- Device Pairing (preferred multi-device path) ---
+
+        document.getElementById('pair-device-btn').addEventListener('click', async () => {
+            const codeEl = document.getElementById('pairing-code-input');
+            const errEl = document.getElementById('pairing-restore-error');
+            const okEl = document.getElementById('pairing-restore-success');
+            const btn = document.getElementById('pair-device-btn');
+            errEl.classList.add('hidden');
+            okEl.classList.add('hidden');
+
+            const code = (codeEl.value || '').trim();
+            if (!code) {
+                errEl.textContent = 'Enter the pairing code from your other device.';
+                errEl.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            const original = btn.textContent;
+            btn.textContent = 'Pairing…';
+            try {
+                const result = await window.DevicePairingService.verifyPairingCode(code);
+                if (result && result.success) {
+                    okEl.textContent = 'Paired! Loading your messages…';
+                    okEl.classList.remove('hidden');
+                    setTimeout(() => { window.location.href = '../../messaging/views/messenger.html'; }, 800);
+                } else {
+                    errEl.textContent = (result && result.error) ? result.error : 'Pairing failed.';
+                    errEl.classList.remove('hidden');
+                    btn.disabled = false;
+                    btn.textContent = original;
+                }
+            } catch (e) {
+                errEl.textContent = 'Pairing failed. Please try again.';
+                errEl.classList.remove('hidden');
+                btn.disabled = false;
+                btn.textContent = original;
             }
         });
 
