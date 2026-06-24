@@ -352,8 +352,19 @@ const AttachmentService = {
     },
 
     /**
-     * H-6: decrypt a metadata blob sealed by _encryptMetadata. Tries the bound KEK
-     * first; throws if it cannot authenticate (caller falls back to legacy columns).
+     * H-6: decrypt a metadata blob sealed by _encryptMetadata.
+     *
+     * BACK-COMPAT (mirrors _decryptFileKey): the blob is sealed under the invariant,
+     * context-bound attachment KEK (AK0 + storage path). When the recipient's
+     * conversation state lacks AK0 (or no context is supplied), getSessionKey falls
+     * back to the legacy RK-rooted key — a DIFFERENT key than the sender used. So we
+     * try the bound KEK FIRST and, only if that authentication fails, fall back to
+     * the legacy session key. This makes metadata decrypt in exactly the same cases
+     * the file key does (the file key already does this); without it, an asymmetric
+     * AK0 between peers degrades the displayed name/type/size to a generic placeholder
+     * even though the file itself decrypts. Throws if neither key authenticates
+     * (caller _resolveMetadata then degrades gracefully).
+     *
      * @param {string} encryptedMetadataB64
      * @param {string} metadataNonceB64
      * @param {number|string} conversationId
@@ -361,19 +372,37 @@ const AttachmentService = {
      * @returns {Promise<{file_name:string, mime_type:string, file_size:number}>}
      */
     async _decryptMetadata(encryptedMetadataB64, metadataNonceB64, conversationId, attachmentPath) {
-        const key = await window.KeyManagementService.getSessionKey(
-            conversationId, { attachmentPath }
-        );
-        if (!(key instanceof Uint8Array)) {
-            throw new Error('No attachment key available for metadata decryption');
-        }
         const ciphertext = Uint8Array.from(atob(encryptedMetadataB64), c => c.charCodeAt(0));
         const nonce = Uint8Array.from(atob(metadataNonceB64), c => c.charCodeAt(0));
-        const plaintext = window.CryptoPrimitivesService.decryptBytes(ciphertext, nonce, key);
-        const json = window.CryptoPrimitivesService.decodeUTF8
-            ? window.CryptoPrimitivesService.decodeUTF8(plaintext)
-            : new TextDecoder().decode(plaintext);
-        return JSON.parse(json);
+
+        const decode = (plaintext) => {
+            const json = window.CryptoPrimitivesService.decodeUTF8
+                ? window.CryptoPrimitivesService.decodeUTF8(plaintext)
+                : new TextDecoder().decode(plaintext);
+            return JSON.parse(json);
+        };
+
+        // 1) W3-2 path: invariant, context-bound KEK (requires a storage path).
+        if (attachmentPath) {
+            const boundKey = await window.KeyManagementService.getSessionKey(
+                conversationId, { attachmentPath }
+            );
+            if (boundKey instanceof Uint8Array) {
+                try {
+                    return decode(window.CryptoPrimitivesService.decryptBytes(ciphertext, nonce, boundKey));
+                } catch (e) {
+                    // Not sealed under the bound key (asymmetric AK0 / pre-W3-2 row) — fall back.
+                    console.log('[AttachmentService] _decryptMetadata: bound key failed, trying legacy key');
+                }
+            }
+        }
+
+        // 2) Legacy/back-compat path: original RK-rooted, unbound key (no context).
+        const legacyKey = await window.KeyManagementService.getSessionKey(conversationId);
+        if (!(legacyKey instanceof Uint8Array)) {
+            throw new Error('No attachment key available for metadata decryption');
+        }
+        return decode(window.CryptoPrimitivesService.decryptBytes(ciphertext, nonce, legacyKey));
     },
 
     /**
